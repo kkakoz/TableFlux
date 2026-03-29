@@ -259,13 +259,59 @@ select {
 
 .sidebar-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 .sidebar-head h2 {
-  margin-bottom: 4px;
+  margin: 0;
+}
+
+.sidebar-main-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sidebar-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-head-actions .sub {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mini-menu-btn {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+.sidebar-object-head {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-object-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.sidebar-refresh-btn {
+  min-height: 32px;
+  padding: 4px 10px;
+}
+
+.sidebar-object-divider {
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
 }
 
 .connection-select {

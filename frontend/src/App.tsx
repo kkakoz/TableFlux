@@ -365,6 +365,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const activeTabError = activeTab?.error ?? "";
   const activeTabResult = activeTab?.result ?? null;
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
+  const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);
 
   const saveSession = async (nextTabs: WorkbenchTab[], nextConn: string) => {
     try {
@@ -518,29 +519,32 @@ function StudioView({ groupId }: { groupId: string }) {
     saveSession(visibleTabs, activeConnectionId);
   }, [visibleTabs, activeConnectionId]);
 
-  useEffect(() => {
+  const reloadDbTree = async () => {
     if (!activeConnectionId) {
       setDbTree([]);
       setSelectedDatabase("");
       return;
     }
-    (async () => {
-      try {
-        const dbs = await api.listDatabases(activeConnectionId);
-        const names = dbs.map((d: any) => d.name);
-        setDbTree(
-          names.map((name) => ({
-            name,
-            expanded: false,
-            loaded: false,
-            tables: [],
-          }))
-        );
-        setSelectedDatabase("");
-      } catch (e) {
-        setError(String(e));
-      }
-    })();
+    try {
+      const dbs = await api.listDatabases(activeConnectionId);
+      const names = dbs.map((d: any) => d.name);
+      setDbTree(
+        names.map((name) => ({
+          name,
+          expanded: false,
+          loaded: false,
+          tables: [],
+        }))
+      );
+      setSelectedDatabase("");
+      setError("");
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  useEffect(() => {
+    void reloadDbTree();
   }, [activeConnectionId, connections]);
 
   const loadTablesForDB = async (dbName: string) => {
@@ -928,36 +932,43 @@ function StudioView({ groupId }: { groupId: string }) {
     <div className="app-shell light studio-layout">
       <aside className="sidebar" style={{ width: `${sidebarWidth}px` }}>
         <div className="sidebar-head">
-          <div>
-            <h2>连接与表</h2>
-            <p className="sub">分组：{currentGroupName}</p>
-          </div>
-          <div className="top-menu-wrap">
-            <button className="btn ghost" onClick={() => setMenuOpen((v) => !v)}>菜单</button>
-            {menuOpen && (
-              <div className="top-menu-panel">
-                <button
-                  className="top-menu-item"
-                  onClick={() => {
-                    setHistoryOpen(true);
-                    setMenuOpen(false);
-                  }}
-                >
-                  历史执行 SQL
-                </button>
-                <button
-                  className="top-menu-item"
-                  onClick={() => {
-                    setMigrationOpen(true);
-                    setMenuOpen(false);
-                  }}
-                >
-                  数据迁移
-                </button>
-              </div>
-            )}
+          <h2 className="sidebar-main-title">数据库</h2>
+          <div className="sidebar-head-actions">
+            <div className="top-menu-wrap">
+              <button className="btn ghost mini-menu-btn" onClick={() => setMenuOpen((v) => !v)}>☰ 菜单</button>
+              {menuOpen && (
+                <div className="top-menu-panel">
+                  <button
+                    className="top-menu-item"
+                    onClick={() => {
+                      setHistoryOpen(true);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    历史执行 SQL
+                  </button>
+                  <button
+                    className="top-menu-item"
+                    onClick={() => {
+                      setMigrationOpen(true);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    数据迁移
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="sub">当前环境：{currentGroupName}</p>
           </div>
         </div>
+        <div className="sidebar-object-head">
+          <h3>对象</h3>
+          <button className="btn ghost sidebar-refresh-btn" onClick={() => void reloadDbTree()} disabled={!activeConnectionId}>
+            ↻ 刷新
+          </button>
+        </div>
+        <div className="sidebar-object-divider" />
         <label className="field-label">数据库连接</label>
         <select className="connection-select" value={activeConnectionId} onChange={(e) => setActiveConnectionId(e.target.value)}>
           <option value="">请选择连接</option>
@@ -1032,7 +1043,6 @@ function StudioView({ groupId }: { groupId: string }) {
         </header>
 
         <div className="tab-strip">
-          {visibleTabs.length === 0 && <span className="sub">请选择数据库后开始</span>}
           {visibleTabs.map((t) => (
             <button key={t.id} className={`tab ${t.id === activeTab?.id ? "active" : ""}`} onClick={() => setActiveForDatabase(selectedDatabase, t.id)}>
               <span>{t.type === "table" ? `表: ${t.title}` : t.title}</span>
@@ -1050,49 +1060,78 @@ function StudioView({ groupId }: { groupId: string }) {
           ))}
         </div>
 
-        {activeTab?.type !== "table" && (
+        {activeTab?.type === "sql" && (
+          <div
+            className="editor-wrap studio-editor-pane"
+            style={showSqlResultPane ? { height: `${editorHeight}px` } : { flex: 1, minHeight: 0 }}
+          >
+            <Editor
+              height="100%"
+              language="sql"
+              value={activeTab?.sql ?? ""}
+              onChange={(v) => setTabSQL(v ?? "")}
+              onMount={onEditorMount}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 14,
+                wordWrap: "on",
+                automaticLayout: true,
+                suggestOnTriggerCharacters: true,
+              }}
+            />
+          </div>
+        )}
+
+        {showSqlResultPane && (
           <>
-            <div className="editor-wrap studio-editor-pane" style={{ height: `${editorHeight}px` }}>
-              <Editor
-                height="100%"
-                language="sql"
-                value={activeTab?.sql ?? ""}
-                onChange={(v) => setTabSQL(v ?? "")}
-                onMount={onEditorMount}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  wordWrap: "on",
-                  automaticLayout: true,
-                  suggestOnTriggerCharacters: true,
-                }}
-              />
-            </div>
             <div className="pane-splitter horizontal" onMouseDown={startEditorResize} />
+            <section className="panel result-panel">
+              <h2>执行结果</h2>
+              {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
+              {activeTabResult && (
+                <>
+                  <p className="sub">{activeTabResult.message}（{activeTabResult.durationMs}ms）</p>
+                  {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
+                    <pre className="log">{activeTabResult.execLog.join("\n")}</pre>
+                  )}
+                  {activeTabResult.rows && activeTabResult.rows.length > 0 && (
+                    <div className="result-content">
+                      <VirtualResultGrid
+                        columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                        rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                        onCopyError={(msg) => setError(msg)}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
           </>
         )}
 
-        <section className="panel result-panel">
-          <h2>{activeTab?.type === "table" ? "表数据" : "执行结果"}</h2>
-          {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
-          {activeTabResult && (
-            <>
-              <p className="sub">{activeTabResult.message}（{activeTabResult.durationMs}ms）</p>
-              {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
-                <pre className="log">{activeTabResult.execLog.join("\n")}</pre>
-              )}
-              {activeTabResult.rows && activeTabResult.rows.length > 0 && (
-                <div className="result-content">
-                  <VirtualResultGrid
-                    columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
-                    rows={activeTabResult.rows as Array<Record<string, unknown>>}
-                    onCopyError={(msg) => setError(msg)}
-                  />
-                </div>
-              )}
-            </>
-          )}
-        </section>
+        {activeTab?.type === "table" && (
+          <section className="panel result-panel">
+            <h2>表数据</h2>
+            {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
+            {activeTabResult && (
+              <>
+                <p className="sub">{activeTabResult.message}（{activeTabResult.durationMs}ms）</p>
+                {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
+                  <pre className="log">{activeTabResult.execLog.join("\n")}</pre>
+                )}
+                {activeTabResult.rows && activeTabResult.rows.length > 0 && (
+                  <div className="result-content">
+                    <VirtualResultGrid
+                      columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                      rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                      onCopyError={(msg) => setError(msg)}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        )}
 
         {historyOpen && (
           <div className="modal-mask" onClick={() => setHistoryOpen(false)}>
@@ -1225,6 +1264,7 @@ function VirtualResultGrid({
   const [ctxMenu, setCtxMenu] = useState<{ left: number; top: number } | null>(null);
   const gridHostRef = useRef<HTMLDivElement | null>(null);
   const dataEditorRef = useRef<DataEditorRef>(null);
+  const lastContextClientPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -1296,7 +1336,13 @@ function VirtualResultGrid({
 
   return (
     <div className="result-grid-root">
-      <div ref={gridHostRef} className="result-grid-host">
+      <div
+        ref={gridHostRef}
+        className="result-grid-host"
+        onContextMenuCapture={(e) => {
+          lastContextClientPosRef.current = { x: e.clientX, y: e.clientY };
+        }}
+      >
         <DataEditor
           ref={dataEditorRef}
           key={`grid-${safePage}-${columns.join("|")}`}
@@ -1315,6 +1361,11 @@ function VirtualResultGrid({
           smoothScrollY
           onCellContextMenu={(_cell, event) => {
             event.preventDefault();
+            const pos = lastContextClientPosRef.current;
+            if (pos) {
+              setCtxMenu({ left: pos.x, top: pos.y });
+              return;
+            }
             const host = gridHostRef.current;
             if (!host) return;
             const rect = host.getBoundingClientRect();
