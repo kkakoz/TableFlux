@@ -71,6 +71,7 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 			singleReq := req
 			singleReq.SQL = trimmed
 			singleReq.Mode = "single"
+			fmt.Println(singleReq.SQL)
 			result, err := s.ExecuteSQL(singleReq)
 			if err != nil {
 				logs = append(logs, fmt.Sprintf("[%d] failed: %v", i+1, err))

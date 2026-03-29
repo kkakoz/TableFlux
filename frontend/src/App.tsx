@@ -1,5 +1,16 @@
 ﻿import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import {
+  DataEditor,
+  GridCellKind,
+  getDefaultTheme,
+  type DataEditorRef,
+  type GridColumn,
+  type Item,
+  type GridCell,
+  type Theme,
+} from "@glideapps/glide-data-grid";
+import "@glideapps/glide-data-grid/dist/index.css";
 import type { editor as MonacoEditorNS, IDisposable, languages } from "monaco-editor";
 import { api } from "./api";
 import type {
@@ -46,6 +57,27 @@ const SQL_KEYWORDS = [
   "DISTINCT",
   "EXPLAIN",
 ];
+
+const gridTheme: Theme = {
+  ...getDefaultTheme(),
+  bgCell: "#ffffff",
+  bgCellMedium: "#f8fafc",
+  bgHeader: "#f1f5f9",
+  bgHeaderHovered: "#e2e8f0",
+  bgHeaderHasFocus: "#e2e8f0",
+  textDark: "#0f172a",
+  textMedium: "#1e293b",
+  textLight: "#334155",
+  textHeader: "#0f172a",
+  borderColor: "#cbd5e1",
+  horizontalBorderColor: "#e2e8f0",
+  accentColor: "#2563eb",
+  accentLight: "rgba(37, 99, 235, 0.12)",
+};
+
+const GRID_ROW_HEIGHT = 32;
+const GRID_HEADER_HEIGHT = 34;
+const ROW_MARKER_WIDTH = 46;
 
 const randomColor = () => {
   const colors = ["#0ea5e9", "#14b8a6", "#22c55e", "#f59e0b", "#ef4444", "#6366f1"];
@@ -240,8 +272,6 @@ function StudioView({ groupId }: { groupId: string }) {
   const [activeTabId, setActiveTabId] = useState("");
   const [result, setResult] = useState<ExecuteSQLResult | null>(null);
   const [error, setError] = useState("");
-  const [selectedCell, setSelectedCell] = useState<{ rowIndex: number; column: string } | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; value: string } | null>(null);
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
   const completionDisposableRef = useRef<IDisposable | null>(null);
@@ -404,7 +434,7 @@ function StudioView({ groupId }: { groupId: string }) {
         database: selectedDatabase,
         sql: activeTab.sql,
         mode,
-        rowLimit: 2000,
+        rowLimit: 50000,
         timeoutMs: 30000,
       });
       setResult(r);
@@ -461,30 +491,6 @@ function StudioView({ groupId }: { groupId: string }) {
       completionDisposableRef.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    const hideMenu = () => setContextMenu(null);
-    window.addEventListener("click", hideMenu);
-    return () => window.removeEventListener("click", hideMenu);
-  }, []);
-
-  const copyText = async (value: string) => {
-    if (!value) return;
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = value;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        textarea.remove();
-      }
-    } catch (e) {
-      setError(`复制失败: ${String(e)}`);
-    }
-  };
 
   return (
     <div className="app-shell light studio-layout">
@@ -595,58 +601,155 @@ function StudioView({ groupId }: { groupId: string }) {
                 <pre className="log">{result.execLog.join("\n")}</pre>
               )}
               {result.rows && result.rows.length > 0 && (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>{(result.columns ?? Object.keys(result.rows[0] ?? {})).map((c) => <th key={c}>{c}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {result.rows.slice(0, 100).map((row, i) => (
-                        <tr key={i}>
-                          {(result.columns ?? Object.keys(row)).map((c) => (
-                            <td
-                              key={c}
-                              className={selectedCell?.rowIndex === i && selectedCell?.column === c ? "cell-selected" : ""}
-                              onClick={() => setSelectedCell({ rowIndex: i, column: c })}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                const value = String(row[c] ?? "");
-                                setSelectedCell({ rowIndex: i, column: c });
-                                setContextMenu({ x: e.clientX, y: e.clientY, value });
-                              }}
-                            >
-                              {String(row[c] ?? "")}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <VirtualResultGrid
+                  columns={result.columns ?? Object.keys(result.rows[0] ?? {})}
+                  rows={result.rows as Array<Record<string, unknown>>}
+                  onCopyError={(msg) => setError(msg)}
+                />
               )}
             </>
           )}
         </section>
-        {contextMenu && (
-          <div
-            className="context-menu"
-            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="context-menu-item"
-              onClick={() => {
-                copyText(contextMenu.value);
-                setContextMenu(null);
-              }}
-            >
-              复制
-            </button>
-          </div>
-        )}
       </section>
     </div>
   );
 }
 
+function VirtualResultGrid({
+  columns,
+  rows,
+  onCopyError,
+}: {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  onCopyError: (msg: string) => void;
+}) {
+  const PAGE_SIZE = 10000;
+  const [page, setPage] = useState(1);
+  const [gridSize, setGridSize] = useState({ width: 900, height: 360 });
+  const [ctxMenu, setCtxMenu] = useState<{ left: number; top: number } | null>(null);
+  const gridHostRef = useRef<HTMLDivElement | null>(null);
+  const dataEditorRef = useRef<DataEditorRef>(null);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * PAGE_SIZE;
+  const pageEnd = Math.min(pageStart + PAGE_SIZE, rows.length);
+  const pageRows = rows.slice(pageStart, pageEnd);
+  const rowCount = pageRows.length;
+
+  useEffect(() => {
+    setPage(1);
+  }, [rows, columns.join("|")]);
+
+  useEffect(() => {
+    const el = gridHostRef.current;
+    if (!el) return;
+    const apply = (w: number, h: number) => {
+      setGridSize({
+        width: Math.max(240, Math.floor(w)),
+        height: Math.max(220, Math.floor(h)),
+      });
+    };
+    apply(el.clientWidth, el.clientHeight);
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0].contentRect;
+      apply(rect.width, rect.height);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [safePage, rowCount]);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const id = window.setTimeout(() => {
+      document.addEventListener("click", close);
+    }, 0);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener("click", close);
+    };
+  }, [ctxMenu]);
+
+  const gridColumns: GridColumn[] = useMemo(
+    () => columns.map((name) => ({ title: name, id: name, width: 180 })),
+    [columns]
+  );
+
+  const getCellContent = useMemo(() => {
+    return ([col, row]: Item): GridCell => {
+      const colName = columns[col];
+      const value = colName ? String(pageRows[row]?.[colName] ?? "") : "";
+      return {
+        kind: GridCellKind.Text,
+        allowOverlay: false,
+        readonly: true,
+        displayData: value,
+        data: value,
+      };
+    };
+  }, [columns, pageRows]);
+
+  const copySelection = async () => {
+    try {
+      await dataEditorRef.current?.emit("copy");
+    } catch (e) {
+      onCopyError(`复制失败: ${String(e)}`);
+    }
+  };
+
+  return (
+    <div className="result-grid-root">
+      <div ref={gridHostRef} className="result-grid-host">
+        <DataEditor
+          ref={dataEditorRef}
+          key={`grid-${safePage}-${columns.join("|")}`}
+          theme={gridTheme}
+          columns={gridColumns}
+          rows={rowCount}
+          getCellContent={getCellContent}
+          getCellsForSelection={true}
+          width={gridSize.width}
+          height={gridSize.height}
+          rowHeight={GRID_ROW_HEIGHT}
+          headerHeight={GRID_HEADER_HEIGHT}
+          rowMarkers={{ kind: "number", width: ROW_MARKER_WIDTH, startIndex: pageStart + 1 }}
+          rowSelectionMode="multi"
+          smoothScrollX
+          smoothScrollY
+          onCellContextMenu={(_cell, event) => {
+            event.preventDefault();
+            const host = gridHostRef.current;
+            if (!host) return;
+            const rect = host.getBoundingClientRect();
+            setCtxMenu({ left: rect.left + event.localEventX, top: rect.top + event.localEventY });
+          }}
+        />
+      </div>
+      {rows.length > PAGE_SIZE && (
+        <div className="result-pager">
+          <button className="btn ghost" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>上一页</button>
+          <span>第 {safePage} / {totalPages} 页（每页 {PAGE_SIZE} 条）</span>
+          <button className="btn ghost" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>下一页</button>
+        </div>
+      )}
+      {ctxMenu ? (
+        <div
+          className="context-menu"
+          style={{ left: `${ctxMenu.left}px`, top: `${ctxMenu.top}px` }}
+          role="menu"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button className="context-menu-item" onClick={() => { void copySelection(); setCtxMenu(null); }}>
+            复制
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default App;
+

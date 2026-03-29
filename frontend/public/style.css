@@ -385,6 +385,60 @@ select {
   border-radius: 8px;
 }
 
+.result-grid-root {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+.result-grid-host {
+  min-height: 220px;
+  height: 360px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.result-grid-header,
+.result-grid-row {
+  display: grid;
+}
+
+.result-grid-viewport {
+  overflow: auto;
+  border-top: 1px solid var(--border);
+}
+
+.result-grid-cell {
+  padding: 6px 8px;
+  border-right: 1px solid #eef2f7;
+  border-bottom: 1px solid #eef2f7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-grid-head-cell {
+  font-weight: 600;
+  background: #f8fafc;
+}
+
+.result-grid-row .result-grid-cell {
+  cursor: default;
+}
+
+.result-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  background: #f8fafc;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

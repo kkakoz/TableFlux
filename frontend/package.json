@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@glideapps/glide-data-grid": "^6.0.3",
     "@monaco-editor/react": "^4.7.0",
     "@wailsio/runtime": "latest",
     "monaco-editor": "^0.55.1",
