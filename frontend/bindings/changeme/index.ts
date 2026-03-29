@@ -18,6 +18,8 @@ export {
     BackgroundTask,
     ConnectionMeta,
     ConnectionUpsertRequest,
+    DataMigrationRequest,
+    DataMigrationResult,
     DeleteRowsRequest,
     ExecuteSQLRequest,
     ExplainSQLRequest,

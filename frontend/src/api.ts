@@ -43,6 +43,7 @@ export const api = {
   listTables: (connectionId: string, database: string, schema = "") =>
     DatabaseService.ListTables(connectionId, database, schema),
   explainSQL: (req: any) => DatabaseService.ExplainSQL(req),
+  migrateTableData: (req: Record<string, unknown>) => DatabaseService.MigrateTableData(req as any),
 
   listTasks: () => TaskService.ListTasks(),
 

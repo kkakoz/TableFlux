@@ -16,7 +16,6 @@ import { api } from "./api";
 import type {
   ConnectionMeta,
   ExecuteSQLResult,
-  StudioTabSnapshot,
   WorkspaceGroup,
 } from "./types";
 
@@ -27,6 +26,30 @@ type DbTreeNode = {
   loaded: boolean;
   tables: string[];
 };
+
+type WorkbenchTab = {
+  id: string;
+  title: string;
+  type: "sql" | "table";
+  sql: string;
+  connectionId: string;
+  contextDb: string;
+  contextTable: string;
+  result: ExecuteSQLResult | null;
+  error: string;
+};
+
+const createSqlTab = (index: number, connectionId: string, database: string): WorkbenchTab => ({
+  id: crypto.randomUUID(),
+  title: `查询 ${index}`,
+  type: "sql",
+  sql: "",
+  connectionId,
+  contextDb: database,
+  contextTable: "",
+  result: null,
+  error: "",
+});
 
 const SQL_KEYWORDS = [
   "SELECT",
@@ -78,6 +101,35 @@ const gridTheme: Theme = {
 const GRID_ROW_HEIGHT = 32;
 const GRID_HEADER_HEIGHT = 34;
 const ROW_MARKER_WIDTH = 46;
+const SQL_HISTORY_KEY = "tableflux.sql_history";
+const SQL_HISTORY_LIMIT = 100;
+
+type SqlHistoryItem = {
+  id: string;
+  sql: string;
+  at: number;
+};
+
+function readSqlHistory(): SqlHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(SQL_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as SqlHistoryItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushSqlHistory(sql: string) {
+  const text = (sql || "").trim();
+  if (!text) return;
+  const next: SqlHistoryItem[] = [
+    { id: crypto.randomUUID(), sql: text, at: Date.now() },
+    ...readSqlHistory().filter((i) => i.sql !== text),
+  ].slice(0, SQL_HISTORY_LIMIT);
+  localStorage.setItem(SQL_HISTORY_KEY, JSON.stringify(next));
+}
 
 const randomColor = () => {
   const colors = ["#0ea5e9", "#14b8a6", "#22c55e", "#f59e0b", "#ef4444", "#6366f1"];
@@ -268,22 +320,65 @@ function StudioView({ groupId }: { groupId: string }) {
   const [dbTree, setDbTree] = useState<DbTreeNode[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState("");
   const [tableFilter, setTableFilter] = useState("");
-  const [tabs, setTabs] = useState<StudioTabSnapshot[]>([{ id: crypto.randomUUID(), title: "SQL 1", sql: "", connectionId: "", contextDb: "", contextTable: "" }]);
-  const [activeTabId, setActiveTabId] = useState("");
-  const [result, setResult] = useState<ExecuteSQLResult | null>(null);
+  const [tabsByDatabase, setTabsByDatabase] = useState<Record<string, WorkbenchTab[]>>({});
+  const [activeTabByDatabase, setActiveTabByDatabase] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [editorHeight, setEditorHeight] = useState(360);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRev, setHistoryRev] = useState(0);
+  const [migrationOpen, setMigrationOpen] = useState(false);
+  const [migrationBusy, setMigrationBusy] = useState(false);
+  const [migrationMsg, setMigrationMsg] = useState("");
+  const [allGroups, setAllGroups] = useState<WorkspaceGroup[]>([]);
+  const [sourceGroupId, setSourceGroupId] = useState("");
+  const [sourceConnectionId, setSourceConnectionId] = useState("");
+  const [sourceDatabase, setSourceDatabase] = useState("");
+  const [sourceDatabases, setSourceDatabases] = useState<string[]>([]);
+  const [sourceTables, setSourceTables] = useState<string[]>([]);
+  const [selectedSourceTables, setSelectedSourceTables] = useState<string[]>([]);
+  const [targetGroupId, setTargetGroupId] = useState("");
+  const [targetConnectionId, setTargetConnectionId] = useState("");
+  const [targetDatabase, setTargetDatabase] = useState("");
+  const [targetDatabases, setTargetDatabases] = useState<string[]>([]);
+  const [targetTables, setTargetTables] = useState<string[]>([]);
+  const [truncateTarget, setTruncateTarget] = useState(false);
+  const [sourceGroupConnections, setSourceGroupConnections] = useState<ConnectionMeta[]>([]);
+  const [targetGroupConnections, setTargetGroupConnections] = useState<ConnectionMeta[]>([]);
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
   const completionDisposableRef = useRef<IDisposable | null>(null);
+  const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
+  const runSQLRef = useRef<(mode: "single" | "batch") => void>(() => {});
+  const addTabRef = useRef<() => void>(() => {});
+  const dragStateRef = useRef<
+    | { type: "sidebar"; startX: number; startWidth: number }
+    | { type: "editor"; startY: number; startHeight: number }
+    | null
+  >(null);
 
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  const databaseTabKey = `${activeConnectionId}::${selectedDatabase || "__none__"}`;
+  const visibleTabs = tabsByDatabase[databaseTabKey] ?? [];
+  const visibleActiveTabId = activeTabByDatabase[databaseTabKey] ?? "";
+  const activeTab = visibleTabs.find((t) => t.id === visibleActiveTabId) ?? visibleTabs[0];
+  const activeTabError = activeTab?.error ?? "";
+  const activeTabResult = activeTab?.result ?? null;
+  const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
 
-  const saveSession = async (nextTabs: StudioTabSnapshot[], nextConn: string) => {
+  const saveSession = async (nextTabs: WorkbenchTab[], nextConn: string) => {
     try {
       await api.saveStudioSession({
         groupId,
         activeConnectionId: nextConn,
-        tabs: nextTabs,
+        tabs: nextTabs.map((t) => ({
+          id: t.id,
+          title: t.title,
+          sql: t.sql,
+          connectionId: t.connectionId,
+          contextDb: t.contextDb,
+          contextTable: t.contextTable,
+        })),
       });
     } catch {
       // ignore non-blocking save failures
@@ -300,23 +395,128 @@ function StudioView({ groupId }: { groupId: string }) {
     (async () => {
       const connList = await api.listGroupConnections(groupId);
       setConnections(connList);
+      const groups = await api.listGroups();
+      setAllGroups(groups);
 
       const session = await api.getStudioSession(groupId);
       const initialConn = session?.activeConnectionId || connList[0]?.id || "";
       if (session?.tabs?.length > 0) {
-        setTabs(session.tabs);
-        setActiveTabId(session.tabs[0].id);
-      } else {
-        setActiveTabId((t) => t || tabs[0].id);
+        const restoredTabs: WorkbenchTab[] = session.tabs.map((t) => ({
+          id: t.id,
+          title: t.title,
+          type: t.contextTable ? "table" : "sql",
+          sql: t.sql,
+          connectionId: t.connectionId,
+          contextDb: t.contextDb,
+          contextTable: t.contextTable,
+          result: null,
+          error: "",
+        }));
+        const defaultDb = restoredTabs[0]?.contextDb || "";
+        const key = `${initialConn}::${defaultDb || "__none__"}`;
+        setTabsByDatabase({ [key]: restoredTabs });
+        setActiveTabByDatabase({ [key]: restoredTabs[0]?.id || "" });
       }
       setActiveConnectionId(initialConn);
+      setSourceGroupId(groupId);
+      setTargetGroupId(groupId);
     })().catch((e) => setError(String(e)));
   }, [groupId]);
 
   useEffect(() => {
-    if (!activeConnectionId || tabs.length === 0) return;
-    saveSession(tabs, activeConnectionId);
-  }, [tabs, activeConnectionId]);
+    if (!sourceGroupId) {
+      setSourceGroupConnections([]);
+      return;
+    }
+    api
+      .listGroupConnections(sourceGroupId)
+      .then((list) => setSourceGroupConnections(list))
+      .catch((e) => setError(String(e)));
+  }, [sourceGroupId]);
+
+  useEffect(() => {
+    if (!targetGroupId) {
+      setTargetGroupConnections([]);
+      return;
+    }
+    api
+      .listGroupConnections(targetGroupId)
+      .then((list) => setTargetGroupConnections(list))
+      .catch((e) => setError(String(e)));
+  }, [targetGroupId]);
+
+  useEffect(() => {
+    if (!sourceConnectionId) {
+      setSourceDatabases([]);
+      setSourceDatabase("");
+      setSourceTables([]);
+      setSelectedSourceTables([]);
+      return;
+    }
+    api
+      .listDatabases(sourceConnectionId)
+      .then((dbs) => {
+        const names = (dbs || []).map((d: any) => d.name);
+        setSourceDatabases(names);
+        setSourceDatabase("");
+        setSourceTables([]);
+        setSelectedSourceTables([]);
+      })
+      .catch((e) => setError(String(e)));
+  }, [sourceConnectionId]);
+
+  useEffect(() => {
+    if (!targetConnectionId) {
+      setTargetDatabases([]);
+      setTargetDatabase("");
+      setTargetTables([]);
+      return;
+    }
+    api
+      .listDatabases(targetConnectionId)
+      .then((dbs) => {
+        const names = (dbs || []).map((d: any) => d.name);
+        setTargetDatabases(names);
+        setTargetDatabase("");
+        setTargetTables([]);
+      })
+      .catch((e) => setError(String(e)));
+  }, [targetConnectionId]);
+
+  useEffect(() => {
+    if (!sourceConnectionId || !sourceDatabase) {
+      setSourceTables([]);
+      setSelectedSourceTables([]);
+      return;
+    }
+    api
+      .listTables(sourceConnectionId, sourceDatabase, "")
+      .then((tables) => {
+        const names = (tables || []).map((t: any) => t.name).sort();
+        setSourceTables(names);
+        setSelectedSourceTables([]);
+      })
+      .catch((e) => setError(String(e)));
+  }, [sourceConnectionId, sourceDatabase]);
+
+  useEffect(() => {
+    if (!targetConnectionId || !targetDatabase) {
+      setTargetTables([]);
+      return;
+    }
+    api
+      .listTables(targetConnectionId, targetDatabase, "")
+      .then((tables) => {
+        const names = (tables || []).map((t: any) => t.name).sort();
+        setTargetTables(names);
+      })
+      .catch((e) => setError(String(e)));
+  }, [targetConnectionId, targetDatabase]);
+
+  useEffect(() => {
+    if (!activeConnectionId) return;
+    saveSession(visibleTabs, activeConnectionId);
+  }, [visibleTabs, activeConnectionId]);
 
   useEffect(() => {
     if (!activeConnectionId) {
@@ -328,17 +528,15 @@ function StudioView({ groupId }: { groupId: string }) {
       try {
         const dbs = await api.listDatabases(activeConnectionId);
         const names = dbs.map((d: any) => d.name);
-        const conn = connections.find((c) => c.id === activeConnectionId);
-        const nextDB = conn?.defaultDb && names.includes(conn.defaultDb) ? conn.defaultDb : (names[0] || "");
         setDbTree(
           names.map((name) => ({
             name,
-            expanded: name === nextDB,
+            expanded: false,
             loaded: false,
             tables: [],
           }))
         );
-        setSelectedDatabase(nextDB);
+        setSelectedDatabase("");
       } catch (e) {
         setError(String(e));
       }
@@ -364,6 +562,25 @@ function StudioView({ groupId }: { groupId: string }) {
     if (!selectedDatabase) return;
     loadTablesForDB(selectedDatabase);
   }, [selectedDatabase, activeConnectionId]);
+
+  useEffect(() => {
+    if (!activeConnectionId || !selectedDatabase) return;
+    const firstTab = createSqlTab(1, activeConnectionId, selectedDatabase);
+    setTabsByDatabase((prev) => {
+      if (prev[databaseTabKey] && prev[databaseTabKey].length > 0) return prev;
+      return {
+        ...prev,
+        [databaseTabKey]: [firstTab],
+      };
+    });
+    setActiveTabByDatabase((prev) => {
+      if (prev[databaseTabKey]) return prev;
+      return {
+        ...prev,
+        [databaseTabKey]: firstTab.id,
+      };
+    });
+  }, [activeConnectionId, selectedDatabase, databaseTabKey]);
 
   const toggleDatabaseExpand = async (dbName: string) => {
     let shouldLoad = false;
@@ -408,9 +625,81 @@ function StudioView({ groupId }: { groupId: string }) {
       .filter((d): d is DbTreeNode & { visibleTables: string[]; forceExpanded: boolean } => Boolean(d));
   }, [dbTree, tableFilter]);
 
+  const upsertDatabaseTabs = (dbName: string, updater: (tabs: WorkbenchTab[]) => WorkbenchTab[]) => {
+    if (!activeConnectionId) return;
+    const key = `${activeConnectionId}::${dbName || "__none__"}`;
+    setTabsByDatabase((prev) => {
+      const current = prev[key] ?? [createSqlTab(1, activeConnectionId, dbName)];
+      return {
+        ...prev,
+        [key]: updater(current),
+      };
+    });
+  };
+
+  const setActiveForDatabase = (dbName: string, tabId: string) => {
+    if (!activeConnectionId) return;
+    const key = `${activeConnectionId}::${dbName || "__none__"}`;
+    setActiveTabByDatabase((prev) => ({ ...prev, [key]: tabId }));
+  };
+
+  const setTabSQL = (sql: string) => {
+    if (!activeTab) return;
+    upsertDatabaseTabs(activeTab.contextDb || selectedDatabase, (list) =>
+      list.map((t) => (t.id === activeTab.id ? { ...t, sql, connectionId: activeConnectionId, contextDb: selectedDatabase } : t))
+    );
+  };
+
   const appendSelectSQL = (dbName: string, tableName: string) => {
+    if (!activeConnectionId) return;
     setSelectedDatabase(dbName);
-    setTabSQL(`${activeTab?.sql || ""}\nSELECT * FROM ${tableName} LIMIT 100;`);
+    const key = `${activeConnectionId}::${dbName || "__none__"}`;
+    const existed = tabsByDatabase[key]?.find((t) => t.type === "table" && t.contextTable === tableName);
+    const tableTabId = existed?.id ?? crypto.randomUUID();
+    setTabsByDatabase((prev) => {
+      const current = prev[key] ?? [createSqlTab(1, activeConnectionId, dbName)];
+      if (existed) return prev;
+      const tableTab: WorkbenchTab = {
+        id: tableTabId,
+        title: tableName,
+        type: "table",
+        sql: `SELECT * FROM ${tableName}`,
+        connectionId: activeConnectionId,
+        contextDb: dbName,
+        contextTable: tableName,
+        result: null,
+        error: "",
+      };
+      return { ...prev, [key]: [...current, tableTab] };
+    });
+    setActiveForDatabase(dbName, tableTabId);
+    void (async () => {
+      try {
+        const r = await api.executeSQL({
+          connectionId: activeConnectionId,
+          database: dbName,
+          sql: `SELECT * FROM ${tableName}`,
+          mode: "single",
+          rowLimit: 50000,
+          timeoutMs: 30000,
+        });
+        setTabsByDatabase((prev) => {
+          const list = prev[key] ?? [];
+          return {
+            ...prev,
+            [key]: list.map((t) => (t.id === tableTabId ? { ...t, result: r, error: "" } : t)),
+          };
+        });
+      } catch (e) {
+        setTabsByDatabase((prev) => {
+          const list = prev[key] ?? [];
+          return {
+            ...prev,
+            [key]: list.map((t) => (t.id === tableTabId ? { ...t, error: String(e), result: null } : t)),
+          };
+        });
+      }
+    })();
   };
 
   useEffect(() => {
@@ -421,48 +710,149 @@ function StudioView({ groupId }: { groupId: string }) {
     });
   }, [tableFilter, dbTree]);
 
-  const setTabSQL = (sql: string) => {
-    const next = tabs.map((t) => (t.id === activeTab.id ? { ...t, sql, connectionId: activeConnectionId, contextDb: selectedDatabase } : t));
-    setTabs(next);
-  };
-
   const runSQL = async (mode: "single" | "batch") => {
     if (!activeConnectionId || !activeTab) return;
+    let sqlText = activeTab.sql;
+    const ed = monacoEditorRef.current;
+    if (ed) {
+      const model = ed.getModel();
+      const sel = ed.getSelection();
+      if (model && sel && !sel.isEmpty()) {
+        sqlText = model.getValueInRange(sel);
+      }
+    }
+    const trimmed = (sqlText || "").trim();
+    if (!trimmed) return;
     try {
       const r = await api.executeSQL({
         connectionId: activeConnectionId,
         database: selectedDatabase,
-        sql: activeTab.sql,
+        sql: trimmed,
         mode,
         rowLimit: 50000,
         timeoutMs: 30000,
       });
-      setResult(r);
+      pushSqlHistory(trimmed);
+      setHistoryRev((n) => n + 1);
+      upsertDatabaseTabs(selectedDatabase, (list) =>
+        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "" } : t))
+      );
       setError("");
     } catch (e) {
+      upsertDatabaseTabs(selectedDatabase, (list) =>
+        list.map((t) => (t.id === activeTab.id ? { ...t, error: String(e), result: null } : t))
+      );
       setError(String(e));
     }
   };
 
   const addTab = () => {
+    if (!activeConnectionId || !selectedDatabase) return;
     const id = crypto.randomUUID();
-    const next = [...tabs, { id, title: `SQL ${tabs.length + 1}`, sql: "", connectionId: activeConnectionId, contextDb: selectedDatabase, contextTable: "" }];
-    setTabs(next);
-    setActiveTabId(id);
+    upsertDatabaseTabs(selectedDatabase, (list) => [
+      ...list,
+      {
+        ...createSqlTab(list.filter((t) => t.type === "sql").length + 1, activeConnectionId, selectedDatabase),
+        id,
+      },
+    ]);
+    setActiveForDatabase(selectedDatabase, id);
   };
+
+  const removeTab = (tabId: string) => {
+    if (!activeConnectionId || !selectedDatabase) return;
+    const key = `${activeConnectionId}::${selectedDatabase || "__none__"}`;
+    const current = visibleTabs;
+    const idx = current.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    const next = current.filter((t) => t.id !== tabId);
+    const fallback = next[Math.max(0, idx - 1)]?.id ?? next[0]?.id ?? "";
+    setTabsByDatabase((prev) => {
+      return { ...prev, [key]: next };
+    });
+    setActiveTabByDatabase((prev) => ({ ...prev, [key]: fallback }));
+  };
+
+  const historyEntries = useMemo(() => readSqlHistory(), [historyRev]);
+
+  const useHistorySql = (sql: string) => {
+    setTabSQL(sql);
+    setHistoryOpen(false);
+  };
+
+  const runMigration = async () => {
+    if (!sourceConnectionId || !targetConnectionId || !sourceDatabase || !targetDatabase) {
+      setMigrationMsg("请完整选择源连接、目标连接、源数据库和目标数据库");
+      return;
+    }
+    if (selectedSourceTables.length === 0) {
+      setMigrationMsg("请至少选择一个要迁移的源表");
+      return;
+    }
+    setMigrationBusy(true);
+    setMigrationMsg("");
+    try {
+      let successCount = 0;
+      const failed: string[] = [];
+      for (const tableName of selectedSourceTables) {
+        try {
+          await api.migrateTableData({
+            sourceConnectionId: sourceConnectionId,
+            sourceDatabase,
+            sourceSchema: "",
+            sourceTable: tableName,
+            targetConnectionId: targetConnectionId,
+            targetDatabase,
+            targetSchema: "",
+            targetTable: tableName,
+            truncateTarget,
+          });
+          successCount += 1;
+        } catch (e) {
+          failed.push(`${tableName}: ${String(e)}`);
+        }
+      }
+      const summary = `迁移完成：成功 ${successCount}/${selectedSourceTables.length} 个表`;
+      setMigrationMsg(failed.length > 0 ? `${summary}\n失败:\n${failed.join("\n")}` : summary);
+    } catch (e) {
+      setMigrationMsg(String(e));
+    } finally {
+      setMigrationBusy(false);
+    }
+  };
+
+  const toggleSourceTable = (tableName: string) => {
+    setSelectedSourceTables((prev) =>
+      prev.includes(tableName) ? prev.filter((t) => t !== tableName) : [...prev, tableName]
+    );
+  };
+
+  const toggleSelectAllSourceTables = () => {
+    setSelectedSourceTables((prev) => (prev.length === sourceTables.length ? [] : [...sourceTables]));
+  };
+
+  useEffect(() => {
+    runSQLRef.current = runSQL;
+    addTabRef.current = addTab;
+  }, [runSQL, addTab]);
 
   const explain = async () => {
     if (!activeConnectionId || !activeTab) return;
     try {
       const r = await api.explainSQL({ connectionId: activeConnectionId, database: selectedDatabase, sql: activeTab.sql });
-      setResult(r);
+      upsertDatabaseTabs(selectedDatabase, (list) =>
+        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "" } : t))
+      );
       setError("");
     } catch (e) {
       setError(String(e));
     }
   };
 
-  const onEditorMount = (_editor: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
+  const onEditorMount = (editor: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
+    monacoEditorRef.current = editor;
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyR, () => runSQLRef.current("single"));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyQ, () => addTabRef.current());
     if (!completionDisposableRef.current) {
       completionDisposableRef.current = monaco.languages.registerCompletionItemProvider("sql", {
         provideCompletionItems: (model, position) => {
@@ -487,15 +877,87 @@ function StudioView({ groupId }: { groupId: string }) {
 
   useEffect(() => {
     return () => {
+      monacoEditorRef.current = null;
       completionDisposableRef.current?.dispose();
       completionDisposableRef.current = null;
     };
   }, []);
 
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      if (drag.type === "sidebar") {
+        const delta = e.clientX - drag.startX;
+        const next = Math.min(Math.max(220, drag.startWidth + delta), Math.max(420, window.innerWidth - 360));
+        setSidebarWidth(next);
+      } else {
+        const delta = e.clientY - drag.startY;
+        const next = Math.min(Math.max(180, drag.startHeight + delta), 760);
+        setEditorHeight(next);
+      }
+    };
+    const onMouseUp = () => {
+      dragStateRef.current = null;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const startSidebarResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStateRef.current = { type: "sidebar", startX: e.clientX, startWidth: sidebarWidth };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  };
+
+  const startEditorResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStateRef.current = { type: "editor", startY: e.clientY, startHeight: editorHeight };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "row-resize";
+  };
+
   return (
     <div className="app-shell light studio-layout">
-      <aside className="sidebar">
-        <h2>连接与表</h2>
+      <aside className="sidebar" style={{ width: `${sidebarWidth}px` }}>
+        <div className="sidebar-head">
+          <div>
+            <h2>连接与表</h2>
+            <p className="sub">分组：{currentGroupName}</p>
+          </div>
+          <div className="top-menu-wrap">
+            <button className="btn ghost" onClick={() => setMenuOpen((v) => !v)}>菜单</button>
+            {menuOpen && (
+              <div className="top-menu-panel">
+                <button
+                  className="top-menu-item"
+                  onClick={() => {
+                    setHistoryOpen(true);
+                    setMenuOpen(false);
+                  }}
+                >
+                  历史执行 SQL
+                </button>
+                <button
+                  className="top-menu-item"
+                  onClick={() => {
+                    setMigrationOpen(true);
+                    setMenuOpen(false);
+                  }}
+                >
+                  数据迁移
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
         <label className="field-label">数据库连接</label>
         <select className="connection-select" value={activeConnectionId} onChange={(e) => setActiveConnectionId(e.target.value)}>
           <option value="">请选择连接</option>
@@ -551,12 +1013,15 @@ function StudioView({ groupId }: { groupId: string }) {
           />
         </div>
       </aside>
+      <div className="pane-splitter vertical" onMouseDown={startSidebarResize} />
 
       <section className="studio-main">
         <header className="topbar">
-          <div>
-            <h1>SQL 工作台</h1>
-            <p className="sub">分组：{groupId} {selectedDatabase ? `｜数据库：${selectedDatabase}` : ""}</p>
+          <div className="studio-title-wrap">
+            <div>
+            <h1>数据库控制台</h1>
+            <p className="sub">{selectedDatabase ? `数据库：${selectedDatabase}` : "请选择数据库开始"}</p>
+            </div>
           </div>
           <div className="row">
             <button className="btn" onClick={() => runSQL("single")}>执行</button>
@@ -567,49 +1032,179 @@ function StudioView({ groupId }: { groupId: string }) {
         </header>
 
         <div className="tab-strip">
-          {tabs.map((t) => (
-            <button key={t.id} className={`tab ${t.id === activeTab?.id ? "active" : ""}`} onClick={() => setActiveTabId(t.id)}>
-              {t.title}
+          {visibleTabs.length === 0 && <span className="sub">请选择数据库后开始</span>}
+          {visibleTabs.map((t) => (
+            <button key={t.id} className={`tab ${t.id === activeTab?.id ? "active" : ""}`} onClick={() => setActiveForDatabase(selectedDatabase, t.id)}>
+              <span>{t.type === "table" ? `表: ${t.title}` : t.title}</span>
+              <span
+                className="tab-close"
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeTab(t.id);
+                }}
+              >
+                ×
+              </span>
             </button>
           ))}
         </div>
 
-        <div className="editor-wrap">
-          <Editor
-            height="360px"
-            language="sql"
-            value={activeTab?.sql ?? ""}
-            onChange={(v) => setTabSQL(v ?? "")}
-            onMount={onEditorMount}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 14,
-              wordWrap: "on",
-              automaticLayout: true,
-              suggestOnTriggerCharacters: true,
-            }}
-          />
-        </div>
+        {activeTab?.type !== "table" && (
+          <>
+            <div className="editor-wrap studio-editor-pane" style={{ height: `${editorHeight}px` }}>
+              <Editor
+                height="100%"
+                language="sql"
+                value={activeTab?.sql ?? ""}
+                onChange={(v) => setTabSQL(v ?? "")}
+                onMount={onEditorMount}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  wordWrap: "on",
+                  automaticLayout: true,
+                  suggestOnTriggerCharacters: true,
+                }}
+              />
+            </div>
+            <div className="pane-splitter horizontal" onMouseDown={startEditorResize} />
+          </>
+        )}
 
         <section className="panel result-panel">
-          <h2>执行结果</h2>
-          {error && <p className="message error">{error}</p>}
-          {result && (
+          <h2>{activeTab?.type === "table" ? "表数据" : "执行结果"}</h2>
+          {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
+          {activeTabResult && (
             <>
-              <p className="sub">{result.message}（{result.durationMs}ms）</p>
-              {result.execLog && result.execLog.length > 0 && (
-                <pre className="log">{result.execLog.join("\n")}</pre>
+              <p className="sub">{activeTabResult.message}（{activeTabResult.durationMs}ms）</p>
+              {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
+                <pre className="log">{activeTabResult.execLog.join("\n")}</pre>
               )}
-              {result.rows && result.rows.length > 0 && (
-                <VirtualResultGrid
-                  columns={result.columns ?? Object.keys(result.rows[0] ?? {})}
-                  rows={result.rows as Array<Record<string, unknown>>}
-                  onCopyError={(msg) => setError(msg)}
-                />
+              {activeTabResult.rows && activeTabResult.rows.length > 0 && (
+                <div className="result-content">
+                  <VirtualResultGrid
+                    columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                    rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                    onCopyError={(msg) => setError(msg)}
+                  />
+                </div>
               )}
             </>
           )}
         </section>
+
+        {historyOpen && (
+          <div className="modal-mask" onClick={() => setHistoryOpen(false)}>
+            <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3>历史执行 SQL</h3>
+                <button className="btn ghost" onClick={() => setHistoryOpen(false)}>关闭</button>
+              </div>
+              <div className="history-list">
+                {historyEntries.length === 0 ? (
+                  <p className="sub">暂无历史记录</p>
+                ) : (
+                  historyEntries.map((item) => (
+                    <button key={item.id} className="history-item" onClick={() => useHistorySql(item.sql)}>
+                      <span className="sub">{new Date(item.at).toLocaleString()}</span>
+                      <pre>{item.sql.length > 500 ? `${item.sql.slice(0, 500)}...` : item.sql}</pre>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {migrationOpen && (
+          <div className="modal-mask" onClick={() => setMigrationOpen(false)}>
+            <div className="modal-panel large" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3>数据迁移</h3>
+                <button className="btn ghost" onClick={() => setMigrationOpen(false)}>关闭</button>
+              </div>
+              <div className="migration-grid">
+                <div className="panel-lite">
+                  <h4>源</h4>
+                  <label>源分组</label>
+                  <select value={sourceGroupId} onChange={(e) => setSourceGroupId(e.target.value)}>
+                    <option value="">请选择分组</option>
+                    {allGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  <label>源连接</label>
+                  <select value={sourceConnectionId} onChange={(e) => setSourceConnectionId(e.target.value)}>
+                    <option value="">请选择连接</option>
+                    {sourceGroupConnections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <label>源数据库</label>
+                  <select value={sourceDatabase} onChange={(e) => setSourceDatabase(e.target.value)} disabled={!sourceConnectionId}>
+                    <option value="">请选择数据库</option>
+                    {sourceDatabases.map((db) => <option key={db} value={db}>{db}</option>)}
+                  </select>
+                  <div className="table-picker-tools">
+                    <label>源表（可多选）</label>
+                    <button className="btn ghost" type="button" onClick={toggleSelectAllSourceTables} disabled={sourceTables.length === 0}>
+                      {selectedSourceTables.length === sourceTables.length && sourceTables.length > 0 ? "取消全选" : "全选"}
+                    </button>
+                  </div>
+                  <div className="table-picker-list">
+                    {sourceTables.length === 0 ? (
+                      <p className="sub">请选择数据库后加载表</p>
+                    ) : (
+                      sourceTables.map((tableName) => (
+                        <label key={tableName} className="table-picker-item">
+                          <input
+                            type="checkbox"
+                            checked={selectedSourceTables.includes(tableName)}
+                            onChange={() => toggleSourceTable(tableName)}
+                          />
+                          <span>{tableName}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div className="panel-lite">
+                  <h4>目标</h4>
+                  <label>目标分组</label>
+                  <select value={targetGroupId} onChange={(e) => setTargetGroupId(e.target.value)}>
+                    <option value="">请选择分组</option>
+                    {allGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  <label>目标连接</label>
+                  <select value={targetConnectionId} onChange={(e) => setTargetConnectionId(e.target.value)}>
+                    <option value="">请选择连接</option>
+                    {targetGroupConnections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <label>目标数据库</label>
+                  <select value={targetDatabase} onChange={(e) => setTargetDatabase(e.target.value)} disabled={!targetConnectionId}>
+                    <option value="">请选择数据库</option>
+                    {targetDatabases.map((db) => <option key={db} value={db}>{db}</option>)}
+                  </select>
+                  <label>目标库表（只读预览）</label>
+                  <div className="table-picker-list">
+                    {targetTables.length === 0 ? (
+                      <p className="sub">请选择数据库后加载表</p>
+                    ) : (
+                      targetTables.map((tableName) => (
+                        <div key={tableName} className="table-picker-item view">
+                          <span>{tableName}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <label className="row"><input type="checkbox" checked={truncateTarget} onChange={(e) => setTruncateTarget(e.target.checked)} />迁移前清空目标表</label>
+                </div>
+              </div>
+              <div className="row">
+                <button className="btn" onClick={runMigration} disabled={migrationBusy || selectedSourceTables.length === 0}>{migrationBusy ? "迁移中..." : "开始迁移"}</button>
+                <span className="sub">已选择 {selectedSourceTables.length} 个源表，默认同名迁移到目标库</span>
+                {migrationMsg && <span className="sub">{migrationMsg}</span>}
+              </div>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

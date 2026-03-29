@@ -218,6 +218,84 @@ export class ConnectionUpsertRequest {
     }
 }
 
+export class DataMigrationRequest {
+    "sourceConnectionId": string;
+    "sourceDatabase": string;
+    "sourceSchema": string;
+    "sourceTable": string;
+    "targetConnectionId": string;
+    "targetDatabase": string;
+    "targetSchema": string;
+    "targetTable": string;
+    "truncateTarget": boolean;
+
+    /** Creates a new DataMigrationRequest instance. */
+    constructor($$source: Partial<DataMigrationRequest> = {}) {
+        if (!("sourceConnectionId" in $$source)) {
+            this["sourceConnectionId"] = "";
+        }
+        if (!("sourceDatabase" in $$source)) {
+            this["sourceDatabase"] = "";
+        }
+        if (!("sourceSchema" in $$source)) {
+            this["sourceSchema"] = "";
+        }
+        if (!("sourceTable" in $$source)) {
+            this["sourceTable"] = "";
+        }
+        if (!("targetConnectionId" in $$source)) {
+            this["targetConnectionId"] = "";
+        }
+        if (!("targetDatabase" in $$source)) {
+            this["targetDatabase"] = "";
+        }
+        if (!("targetSchema" in $$source)) {
+            this["targetSchema"] = "";
+        }
+        if (!("targetTable" in $$source)) {
+            this["targetTable"] = "";
+        }
+        if (!("truncateTarget" in $$source)) {
+            this["truncateTarget"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DataMigrationRequest instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DataMigrationRequest {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DataMigrationRequest($$parsedSource as Partial<DataMigrationRequest>);
+    }
+}
+
+export class DataMigrationResult {
+    "migratedRows": number;
+    "message": string;
+
+    /** Creates a new DataMigrationResult instance. */
+    constructor($$source: Partial<DataMigrationResult> = {}) {
+        if (!("migratedRows" in $$source)) {
+            this["migratedRows"] = 0;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DataMigrationResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DataMigrationResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DataMigrationResult($$parsedSource as Partial<DataMigrationResult>);
+    }
+}
+
 export class DeleteRowsRequest {
     "connectionId": string;
     "database": string;

@@ -67,9 +67,15 @@ export function ListViews(connectionID: string, database: string, schema: string
     });
 }
 
+export function MigrateTableData(req: $models.DataMigrationRequest): $CancellablePromise<$models.DataMigrationResult> {
+    return $Call.ByID(3157894491, req).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
 export function QueryTablePage(req: $models.TableQueryRequest): $CancellablePromise<$models.QueryResultPage> {
     return $Call.ByID(2696123903, req).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -83,4 +89,5 @@ export function UpdateRows(req: $models.UpdateRowsRequest): $CancellablePromise<
 const $$createType0 = $models.SQLExecutionResult.createFrom;
 const $$createType1 = $models.SchemaObject.createFrom;
 const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = $models.QueryResultPage.createFrom;
+const $$createType3 = $models.DataMigrationResult.createFrom;
+const $$createType4 = $models.QueryResultPage.createFrom;

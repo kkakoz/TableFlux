@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import "time"
 
@@ -13,24 +13,24 @@ type WorkspaceGroup struct {
 }
 
 type ConnectionMeta struct {
-	ID                   string    `json:"id"`
-	GroupID              string    `json:"groupId"`
-	Name                 string    `json:"name"`
-	Driver               string    `json:"driver"`
-	Host                 string    `json:"host"`
-	Port                 int       `json:"port"`
-	User                 string    `json:"user"`
-	DefaultDB            string    `json:"defaultDb"`
-	SSLMode              string    `json:"sslMode"`
-	SSHTunnel            bool      `json:"sshTunnel"`
-	Tags                 []string  `json:"tags"`
-	ReadOnlyFlag         bool      `json:"readOnlyFlag"`
-	Favorite             bool      `json:"favorite"`
+	ID                   string     `json:"id"`
+	GroupID              string     `json:"groupId"`
+	Name                 string     `json:"name"`
+	Driver               string     `json:"driver"`
+	Host                 string     `json:"host"`
+	Port                 int        `json:"port"`
+	User                 string     `json:"user"`
+	DefaultDB            string     `json:"defaultDb"`
+	SSLMode              string     `json:"sslMode"`
+	SSHTunnel            bool       `json:"sshTunnel"`
+	Tags                 []string   `json:"tags"`
+	ReadOnlyFlag         bool       `json:"readOnlyFlag"`
+	Favorite             bool       `json:"favorite"`
 	LastHealthCheckAt    *time.Time `json:"lastHealthCheckAt,omitempty"`
-	LastHealthCheckOK    bool      `json:"lastHealthCheckOk"`
-	LastHealthCheckError string    `json:"lastHealthCheckError,omitempty"`
-	CreatedAt            time.Time `json:"createdAt"`
-	UpdatedAt            time.Time `json:"updatedAt"`
+	LastHealthCheckOK    bool       `json:"lastHealthCheckOk"`
+	LastHealthCheckError string     `json:"lastHealthCheckError,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 
 type ConnectionUpsertRequest struct {
@@ -153,20 +153,37 @@ type BackgroundTask struct {
 	EndedAt   time.Time `json:"endedAt"`
 }
 
+type DataMigrationRequest struct {
+	SourceConnectionID string `json:"sourceConnectionId"`
+	SourceDatabase     string `json:"sourceDatabase"`
+	SourceSchema       string `json:"sourceSchema"`
+	SourceTable        string `json:"sourceTable"`
+	TargetConnectionID string `json:"targetConnectionId"`
+	TargetDatabase     string `json:"targetDatabase"`
+	TargetSchema       string `json:"targetSchema"`
+	TargetTable        string `json:"targetTable"`
+	TruncateTarget     bool   `json:"truncateTarget"`
+}
+
+type DataMigrationResult struct {
+	MigratedRows int64  `json:"migratedRows"`
+	Message      string `json:"message"`
+}
+
 type StudioTabSnapshot struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	SQL         string `json:"sql"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	SQL          string `json:"sql"`
 	ConnectionID string `json:"connectionId"`
-	ContextDB   string `json:"contextDb"`
+	ContextDB    string `json:"contextDb"`
 	ContextTable string `json:"contextTable"`
 }
 
 type StudioSessionSnapshot struct {
-	GroupID           string              `json:"groupId"`
-	ActiveConnectionID string             `json:"activeConnectionId"`
-	Tabs              []StudioTabSnapshot `json:"tabs"`
-	UpdatedAt         time.Time           `json:"updatedAt"`
+	GroupID            string              `json:"groupId"`
+	ActiveConnectionID string              `json:"activeConnectionId"`
+	Tabs               []StudioTabSnapshot `json:"tabs"`
+	UpdatedAt          time.Time           `json:"updatedAt"`
 }
 
 type SaveStudioSessionRequest struct {

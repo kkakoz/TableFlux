@@ -507,6 +507,103 @@ func (s *DatabaseService) DeleteRows(req DeleteRowsRequest) (SQLExecutionResult,
 	return SQLExecutionResult{RowsAffected: total, Message: fmt.Sprintf("Deleted %d rows", total)}, nil
 }
 
+func (s *DatabaseService) MigrateTableData(req DataMigrationRequest) (DataMigrationResult, error) {
+	if req.SourceConnectionID == "" || req.TargetConnectionID == "" {
+		return DataMigrationResult{}, errors.New("sourceConnectionId and targetConnectionId are required")
+	}
+	if req.SourceTable == "" || req.TargetTable == "" {
+		return DataMigrationResult{}, errors.New("sourceTable and targetTable are required")
+	}
+	_, srcDB, err := s.getPool(req.SourceConnectionID, req.SourceDatabase)
+	if err != nil {
+		return DataMigrationResult{}, err
+	}
+	targetConn, dstDB, err := s.getPool(req.TargetConnectionID, req.TargetDatabase)
+	if err != nil {
+		return DataMigrationResult{}, err
+	}
+	if targetConn.ReadOnlyFlag {
+		return DataMigrationResult{}, errors.New("target connection is read-only")
+	}
+
+	srcConn, ok := s.store.GetConnection(req.SourceConnectionID)
+	if !ok {
+		return DataMigrationResult{}, errors.New("source connection not found")
+	}
+	srcTableRef := tableRef(srcConn.Driver, req.SourceSchema, req.SourceTable)
+	dstTableRef := tableRef(targetConn.Driver, req.TargetSchema, req.TargetTable)
+
+	rows, err := srcDB.Query(fmt.Sprintf("SELECT * FROM %s", srcTableRef))
+	if err != nil {
+		return DataMigrationResult{}, err
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return DataMigrationResult{}, err
+	}
+	if len(columns) == 0 {
+		return DataMigrationResult{MigratedRows: 0, Message: "No columns to migrate"}, nil
+	}
+
+	tx, err := dstDB.Begin()
+	if err != nil {
+		return DataMigrationResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if req.TruncateTarget {
+		if _, err := tx.Exec(fmt.Sprintf("TRUNCATE TABLE %s", dstTableRef)); err != nil {
+			return DataMigrationResult{}, err
+		}
+	}
+
+	colSQL := quoteColumns(targetConn.Driver, columns)
+	holders := make([]string, 0, len(columns))
+	for i := range columns {
+		holders = append(holders, placeholder(targetConn.Driver, i+1))
+	}
+	insertSQL := fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES (%s)",
+		dstTableRef,
+		strings.Join(colSQL, ","),
+		strings.Join(holders, ","),
+	)
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		return DataMigrationResult{}, err
+	}
+	defer stmt.Close()
+
+	migrated := int64(0)
+	for rows.Next() {
+		values := make([]any, len(columns))
+		refs := make([]any, len(columns))
+		for i := range values {
+			refs[i] = &values[i]
+		}
+		if err := rows.Scan(refs...); err != nil {
+			return DataMigrationResult{}, err
+		}
+		if _, err := stmt.Exec(values...); err != nil {
+			return DataMigrationResult{}, err
+		}
+		migrated++
+	}
+	if err := rows.Err(); err != nil {
+		return DataMigrationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return DataMigrationResult{}, err
+	}
+
+	return DataMigrationResult{
+		MigratedRows: migrated,
+		Message:      fmt.Sprintf("Migration completed, %d rows copied", migrated),
+	}, nil
+}
+
 func (s *DatabaseService) getPool(connectionID, overrideDB string) (ConnectionMeta, *sql.DB, error) {
 	conn, ok := s.store.GetConnection(connectionID)
 	if !ok {
