@@ -1,9 +1,12 @@
-﻿import {
+import {
+  AIService,
   DatabaseService,
   SecretService,
   StudioWindowService,
   TaskService,
   WorkspaceService,
+  AssistRequest,
+  type AssistResponse,
   type ConnectionMeta,
   type ExecuteSQLRequest,
   GroupCreateRequest,
@@ -51,4 +54,8 @@ export const api = {
     WorkspaceService.GetStudioSession(groupId) as Promise<StudioSessionSnapshot>,
   saveStudioSession: (payload: SaveStudioSessionRequest | Record<string, unknown>) =>
     WorkspaceService.SaveStudioSession(new SaveStudioSessionRequest(payload as any)),
+
+  /** AI SQL 助手（两轮模型调用） */
+  assistSQL: (payload: Record<string, unknown>) =>
+    AIService.Assist(new AssistRequest(payload)) as Promise<AssistResponse | null>,
 };

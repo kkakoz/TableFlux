@@ -549,16 +549,20 @@ func (s *DatabaseService) GetTableSchema(req TableSchemaRequest) (TableSchema, e
 	for rows.Next() {
 		var col TableColumnSchema
 		var nullableStr, extra, comment string
+		var defaultVal sql.NullString
 		if conn.Driver == "mysql" {
-			if err := rows.Scan(&col.Name, &col.Type, &nullableStr, &col.DefaultValue,
+			if err := rows.Scan(&col.Name, &col.Type, &nullableStr, &defaultVal,
 				new(string), &extra, &comment); err != nil {
 				return TableSchema{}, err
 			}
 		} else {
-			if err := rows.Scan(&col.Name, &col.Type, &nullableStr, &col.DefaultValue,
+			if err := rows.Scan(&col.Name, &col.Type, &nullableStr, &defaultVal,
 				new(string), &extra, &comment); err != nil {
 				return TableSchema{}, err
 			}
+		}
+		if defaultVal.Valid {
+			col.DefaultValue = defaultVal.String
 		}
 		col.Nullable = (nullableStr == "YES")
 		col.AutoIncrement = (extra == "auto_increment")

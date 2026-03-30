@@ -5,9 +5,26 @@
 // @ts-ignore: Unused imports
 import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as $models from "./models.js";
+
 /**
- * SaveAIConfig 将 apiKey、apiUrl、modelName 保存到本地密钥存储（管道分隔）。
+ * Assist 两轮对话：选表与意图 → 生成 SQL / 解释 / 改写。
+ */
+export function Assist(req: $models.AssistRequest): $CancellablePromise<$models.AssistResponse | null> {
+    return $Call.ByID(4095022964, req).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * SaveAIConfig 与设置页使用同一存储（settings.json），保持与 SettingsService.SaveAIConfig 行为一致。
  */
 export function SaveAIConfig(apiKey: string, apiUrl: string, modelName: string): $CancellablePromise<void> {
     return $Call.ByID(2210810222, apiKey, apiUrl, modelName);
 }
+
+// Private type creation functions
+const $$createType0 = $models.AssistResponse.createFrom;
+const $$createType1 = $Create.Nullable($$createType0);

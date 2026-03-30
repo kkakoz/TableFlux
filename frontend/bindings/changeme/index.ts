@@ -19,6 +19,8 @@ export {
 };
 
 export {
+    AssistRequest,
+    AssistResponse,
     BackgroundTask,
     ConnectionMeta,
     ConnectionUpsertRequest,

@@ -1,4 +1,4 @@
-﻿import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import {
   DataEditor,
@@ -353,12 +353,28 @@ function StudioView({ groupId }: { groupId: string }) {
   const [truncateTarget, setTruncateTarget] = useState(false);
   const [sourceGroupConnections, setSourceGroupConnections] = useState<ConnectionMeta[]>([]);
   const [targetGroupConnections, setTargetGroupConnections] = useState<ConnectionMeta[]>([]);
+  const [aiAssistOpen, setAiAssistOpen] = useState(false);
+  const [aiAssistPos, setAiAssistPos] = useState<{ left: number; top: number } | null>(null);
+  const [aiAssistInput, setAiAssistInput] = useState("");
+  const [aiAssistBusy, setAiAssistBusy] = useState(false);
+  const [aiAssistErr, setAiAssistErr] = useState("");
+  const [aiAssistFeedback, setAiAssistFeedback] = useState("");
+  const [aiAssistResult, setAiAssistResult] = useState<{
+    intent: string;
+    type: string;
+    content: string;
+    explanation?: string;
+    relevantTables?: string[];
+    reason?: string;
+  } | null>(null);
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
   const completionDisposableRef = useRef<IDisposable | null>(null);
   const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
   const runSQLRef = useRef<(mode: "single" | "batch") => void>(() => {});
   const addTabRef = useRef<() => void>(() => {});
+  const openAiAssistRef = useRef<() => void>(() => {});
+  const aiAssistInputRef = useRef<HTMLTextAreaElement | null>(null);
   const dragStateRef = useRef<
     | { type: "sidebar"; startX: number; startWidth: number }
     | { type: "editor"; startY: number; startHeight: number }
@@ -371,6 +387,10 @@ function StudioView({ groupId }: { groupId: string }) {
   const activeTab = visibleTabs.find((t) => t.id === visibleActiveTabId) ?? visibleTabs[0];
   const activeTabError = activeTab?.error ?? "";
   const activeTabResult = activeTab?.result ?? null;
+  const sqlDialect = useMemo(() => {
+    const c = connections.find((x) => x.id === activeConnectionId);
+    return c?.driver === "postgres" ? "postgres" : "mysql";
+  }, [connections, activeConnectionId]);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
   const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);
 
@@ -860,10 +880,124 @@ function StudioView({ groupId }: { groupId: string }) {
     }
   };
 
+  const openAiAssist = useCallback(() => {
+    if (activeTab?.type !== "sql") return;
+    const ed = monacoEditorRef.current;
+    if (!ed) return;
+    const pos = ed.getPosition();
+    const dom = ed.getDomNode();
+    const rect = dom?.getBoundingClientRect();
+    if (!rect) return;
+    let left = rect.left + 48;
+    let top = rect.top + 80;
+    if (pos) {
+      const coords = ed.getScrolledVisiblePosition(pos);
+      if (coords) {
+        left = Math.min(Math.max(8, rect.left + coords.left), window.innerWidth - 372);
+        top = Math.min(Math.max(8, rect.top + coords.top + coords.height + 6), window.innerHeight - 320);
+      }
+    }
+    setAiAssistPos({ left, top });
+    setAiAssistInput("");
+    setAiAssistErr("");
+    setAiAssistFeedback("");
+    setAiAssistResult(null);
+    setAiAssistOpen(true);
+  }, [activeTab?.type]);
+
+  const appendSqlToEditorEnd = useCallback(
+    (sql: string) => {
+      const ed = monacoEditorRef.current;
+      const model = ed?.getModel();
+      if (!ed || !model) return;
+      const t = sql.trim();
+      if (!t) return;
+      const val = model.getValue();
+      const needsNl = val.length > 0 && !/\n$/.test(val);
+      const insert = (needsNl ? "\n\n" : "") + t;
+      const endLine = model.getLineCount();
+      const endCol = model.getLineMaxColumn(endLine);
+      ed.executeEdits("ai-assist-append", [
+        {
+          range: {
+            startLineNumber: endLine,
+            startColumn: endCol,
+            endLineNumber: endLine,
+            endColumn: endCol,
+          },
+          text: insert,
+        },
+      ]);
+      setTabSQL(model.getValue());
+      ed.focus();
+    },
+    [setTabSQL],
+  );
+
+  const submitAiAssist = async () => {
+    const text = aiAssistInput.trim();
+    if (!text) return;
+    const ed = monacoEditorRef.current;
+    if (!ed) return;
+    const model = ed.getModel();
+    const sel = ed.getSelection();
+    let selectedText = "";
+    if (model && sel && !sel.isEmpty()) {
+      selectedText = model.getValueInRange(sel);
+    }
+    setAiAssistBusy(true);
+    setAiAssistErr("");
+    setAiAssistFeedback("");
+    setAiAssistResult(null);
+    try {
+      const r = await api.assistSQL({
+        dialect: sqlDialect,
+        inputText: text,
+        selectedText,
+        databaseName: selectedDatabase,
+        connectionId: activeConnectionId,
+      });
+      if (r) {
+        const rec = {
+          intent: r.intent ?? "",
+          type: r.type ?? "",
+          content: r.content ?? "",
+          explanation: r.explanation,
+          relevantTables: r.relevantTables,
+          reason: r.reason,
+        };
+        setAiAssistResult(rec);
+        const typ = (rec.type || "").toLowerCase();
+        const body = rec.content?.trim() ?? "";
+        if ((typ === "sql" || typ === "rewrite") && body) {
+          appendSqlToEditorEnd(body);
+          setAiAssistFeedback("已追加到编辑器末尾");
+        } else {
+          setAiAssistFeedback("");
+        }
+      }
+    } catch (e) {
+      setAiAssistErr(String(e));
+    } finally {
+      setAiAssistBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    openAiAssistRef.current = openAiAssist;
+  }, [openAiAssist]);
+
+  useEffect(() => {
+    if (!aiAssistOpen) return;
+    const t = window.setTimeout(() => aiAssistInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [aiAssistOpen]);
+
   const onEditorMount = (editor: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
     monacoEditorRef.current = editor;
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyR, () => runSQLRef.current("single"));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyQ, () => addTabRef.current());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL, () => openAiAssistRef.current());
     if (!completionDisposableRef.current) {
       completionDisposableRef.current = monaco.languages.registerCompletionItemProvider("sql", {
         provideCompletionItems: (model, position) => {
@@ -1038,7 +1172,7 @@ function StudioView({ groupId }: { groupId: string }) {
           <div className="studio-title-wrap">
             <div>
             <h1>数据库控制台</h1>
-            <p className="sub">{selectedDatabase ? `数据库：${selectedDatabase}` : "请选择数据库开始"}</p>
+            <p className="sub">{selectedDatabase ? `数据库：${selectedDatabase}` : "请选择数据库开始"} · Ctrl+L AI 助手</p>
             </div>
           </div>
           <div className="row">
@@ -1161,6 +1295,75 @@ function StudioView({ groupId }: { groupId: string }) {
               </div>
             </div>
           </div>
+        )}
+
+        {aiAssistOpen && aiAssistPos && (
+          <>
+            <div
+              className="ai-assist-backdrop"
+              role="presentation"
+              onMouseDown={() => {
+                setAiAssistOpen(false);
+                setAiAssistPos(null);
+              }}
+            />
+            <div
+              className="ai-assist-popover"
+              style={{ left: `${aiAssistPos.left}px`, top: `${aiAssistPos.top}px` }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="ai-assist-top">
+                <textarea
+                  ref={aiAssistInputRef}
+                  className="ai-assist-input"
+                  rows={2}
+                  placeholder="编辑所选 SQL 或描述需求"
+                  value={aiAssistInput}
+                  onChange={(e) => setAiAssistInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      void submitAiAssist();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ai-assist-close"
+                  aria-label="关闭"
+                  onClick={() => {
+                    setAiAssistOpen(false);
+                    setAiAssistPos(null);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="ai-assist-toolbar">
+                <span className="ai-assist-toolbar-left">SQL 助手</span>
+                <span className="ai-assist-toolbar-mid">选中内容</span>
+                <button
+                  type="button"
+                  className="ai-assist-submit"
+                  disabled={aiAssistBusy || !aiAssistInput.trim()}
+                  title="发送 (Ctrl+Enter)"
+                  onClick={() => void submitAiAssist()}
+                >
+                  {aiAssistBusy ? "…" : "↑"}
+                </button>
+              </div>
+              {aiAssistErr ? <p className="ai-assist-err">{aiAssistErr}</p> : null}
+              {aiAssistFeedback ? <p className="ai-assist-feedback">{aiAssistFeedback}</p> : null}
+              {aiAssistResult && (aiAssistResult.type || "").toLowerCase() === "explanation" ? (
+                <pre className="ai-assist-explain">{aiAssistResult.content}</pre>
+              ) : null}
+              {aiAssistResult &&
+              (aiAssistResult.explanation || "").trim() !== "" &&
+              (aiAssistResult.type || "").toLowerCase() !== "explanation" ? (
+                <p className="ai-assist-explain-note">{aiAssistResult.explanation}</p>
+              ) : null}
+            </div>
+          </>
         )}
 
         {migrationOpen && (

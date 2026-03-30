@@ -27,6 +27,7 @@ type AssistRequest struct {
 	InputText    string `json:"inputText"`    // 用户自然语言输入
 	SelectedText string `json:"selectedText"` // 编辑器中选中的SQL，可为空
 	DatabaseName string `json:"databaseName"` // 当前数据库名，可选
+	ConnectionID string `json:"connectionId,omitempty"` // 可选，后续接真实 SchemaRepository 时使用
 }
 
 type AssistResponse struct {
@@ -57,10 +58,10 @@ type FinalResult struct {
 
 type SchemaRepository interface {
 	// 获取当前库下所有表的简要信息，供第一轮选表
-	ListTableSummaries(ctx context.Context, databaseName string) ([]TableSummary, error)
+	ListTableSummaries(ctx context.Context, connectionID, databaseName string) ([]TableSummary, error)
 
 	// 根据表名获取详细 schema，供第二轮生成 SQL
-	GetTablesSchema(ctx context.Context, databaseName string, tableNames []string) ([]TableSchema, error)
+	GetTablesSchema(ctx context.Context, connectionID, databaseName string, tableNames []string) ([]TableSchema, error)
 }
 
 type TableSummary struct {
@@ -92,7 +93,7 @@ func (s *AssistService) Assist(req AssistRequest) (*AssistResponse, error) {
 	}
 
 	// 1. 取表摘要
-	tableSummaries, err := s.schemaRepo.ListTableSummaries(ctx, req.DatabaseName)
+	tableSummaries, err := s.schemaRepo.ListTableSummaries(ctx, req.ConnectionID, req.DatabaseName)
 	if err != nil {
 		return nil, fmt.Errorf("list table summaries failed: %w", err)
 	}
@@ -116,7 +117,7 @@ func (s *AssistService) Assist(req AssistRequest) (*AssistResponse, error) {
 	// 没选出表时，也允许继续走；但生成 SQL 的效果可能受影响
 	var tableSchemas []TableSchema
 	if len(selectResult.RelevantTables) > 0 {
-		tableSchemas, err = s.schemaRepo.GetTablesSchema(ctx, req.DatabaseName, selectResult.RelevantTables)
+		tableSchemas, err = s.schemaRepo.GetTablesSchema(ctx, req.ConnectionID, req.DatabaseName, selectResult.RelevantTables)
 		if err != nil {
 			return nil, fmt.Errorf("get table schemas failed: %w", err)
 		}
@@ -135,11 +136,15 @@ func (s *AssistService) Assist(req AssistRequest) (*AssistResponse, error) {
 	}
 
 	finalResult.Type = normalizeFinalType(finalResult.Type)
+	content := strings.TrimSpace(finalResult.Content)
+	if mysqlLikeDialect(req.Dialect) && (finalResult.Type == "sql" || finalResult.Type == "rewrite") {
+		content = sanitizeMySQLIdentifierSQL(content, selectResult.RelevantTables)
+	}
 
 	resp := &AssistResponse{
 		Intent:         selectResult.Intent,
 		Type:           finalResult.Type,
-		Content:        strings.TrimSpace(finalResult.Content),
+		Content:        content,
 		Explanation:    strings.TrimSpace(finalResult.Explanation),
 		RelevantTables: selectResult.RelevantTables,
 		Reason:         strings.TrimSpace(selectResult.Reason),
@@ -172,8 +177,7 @@ const firstRoundSystemPrompt = `
 4. 只返回合法 JSON
 `
 
-const secondRoundSystemPrompt = `
-你是数据库客户端中的 AI SQL 助手。
+const secondRoundSystemPrompt = `你是数据库客户端中的 AI SQL 助手。
 
 请严格输出 JSON，不要输出 markdown，不要输出代码块，不要输出额外说明。
 
@@ -190,7 +194,11 @@ const secondRoundSystemPrompt = `
 3. 如果 intent=rewrite_sql，则 type 返回 rewrite，content 返回改写后的 SQL
 4. explanation 字段可选，但尽量给出简洁说明
 5. SQL 要和 dialect 匹配
-6. 仅返回合法 JSON
+6. 标识符与保留字（极其重要，否则会在 MySQL 中报错 1064）：
+   - 当 dialect 为 mysql 或 mariadb：MySQL 保留字作表名/列名时必须用反引号包裹。常见保留字包括：order、group、select、table、key、user、status、rank、rows、desc、partition 等。错误示例：FROM order；正确示例：FROM ` + "`order`" + ` 或 FROM ` + "`mydb`.`order`" + `。建议对所有表名、列名统一使用反引号。
+   - 当 dialect 为 postgres 或 postgresql：与保留字冲突的标识符用双引号，例如 FROM "order"。
+   - 当 dialect 为 sqlite：冲突标识符用双引号。
+7. 仅返回合法 JSON
 `
 
 // ========= Prompt 构建 =========
@@ -222,6 +230,9 @@ func buildFinalRoundUserPrompt(req AssistRequest, selectResult TableSelectResult
 		"reason":         selectResult.Reason,
 		"schemas":        schemas,
 	}
+	if mysqlLikeDialect(req.Dialect) {
+		payload["sqlIdentifierHint"] = "MySQL: wrap table/column names in backticks when they are reserved words (e.g. `order`, `group`)."
+	}
 
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -231,6 +242,11 @@ func buildFinalRoundUserPrompt(req AssistRequest, selectResult TableSelectResult
 }
 
 // ========= 工具函数 =========
+
+func mysqlLikeDialect(s string) bool {
+	d := strings.ToLower(strings.TrimSpace(s))
+	return strings.Contains(d, "mysql") || d == "mariadb"
+}
 
 func normalizeIntent(s string) string {
 	switch strings.TrimSpace(strings.ToLower(s)) {

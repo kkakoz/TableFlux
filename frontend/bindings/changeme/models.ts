@@ -9,6 +9,79 @@ import { Create as $Create } from "@wailsio/runtime";
 // @ts-ignore: Unused imports
 import * as time$0 from "../time/models.js";
 
+/**
+ * AssistRequest / AssistResponse 与 chat.AssistService 对齐，供 Wails 暴露给前端。
+ */
+export class AssistRequest {
+    "dialect": string;
+    "inputText": string;
+    "selectedText": string;
+    "databaseName": string;
+    "connectionId"?: string;
+
+    /** Creates a new AssistRequest instance. */
+    constructor($$source: Partial<AssistRequest> = {}) {
+        if (!("dialect" in $$source)) {
+            this["dialect"] = "";
+        }
+        if (!("inputText" in $$source)) {
+            this["inputText"] = "";
+        }
+        if (!("selectedText" in $$source)) {
+            this["selectedText"] = "";
+        }
+        if (!("databaseName" in $$source)) {
+            this["databaseName"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AssistRequest instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AssistRequest {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AssistRequest($$parsedSource as Partial<AssistRequest>);
+    }
+}
+
+export class AssistResponse {
+    "intent": string;
+    "type": string;
+    "content": string;
+    "explanation"?: string;
+    "relevantTables"?: string[];
+    "reason"?: string;
+
+    /** Creates a new AssistResponse instance. */
+    constructor($$source: Partial<AssistResponse> = {}) {
+        if (!("intent" in $$source)) {
+            this["intent"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("content" in $$source)) {
+            this["content"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AssistResponse instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AssistResponse {
+        const $$createField4_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("relevantTables" in $$parsedSource) {
+            $$parsedSource["relevantTables"] = $$createField4_0($$parsedSource["relevantTables"]);
+        }
+        return new AssistResponse($$parsedSource as Partial<AssistResponse>);
+    }
+}
+
 export class BackgroundTask {
     "id": string;
     "kind": string;

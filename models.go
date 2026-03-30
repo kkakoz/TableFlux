@@ -237,3 +237,21 @@ type TableSchemaRequest struct {
 	Table        string `json:"table"`
 }
 
+// AssistRequest / AssistResponse 与 chat.AssistService 对齐，供 Wails 暴露给前端。
+type AssistRequest struct {
+	Dialect      string `json:"dialect"`
+	InputText    string `json:"inputText"`
+	SelectedText string `json:"selectedText"`
+	DatabaseName string `json:"databaseName"`
+	ConnectionID string `json:"connectionId,omitempty"`
+}
+
+type AssistResponse struct {
+	Intent         string   `json:"intent"`
+	Type           string   `json:"type"`
+	Content        string   `json:"content"`
+	Explanation    string   `json:"explanation,omitempty"`
+	RelevantTables []string `json:"relevantTables,omitempty"`
+	Reason         string   `json:"reason,omitempty"`
+}
+

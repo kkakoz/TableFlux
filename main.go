@@ -20,11 +20,11 @@ func main() {
 	dbSvc := NewDatabaseService(store, secretSvc)
 	studioSvc := NewStudioWindowService(store)
 	taskSvc := NewTaskService(store)
-	aiSvc := NewAIService(secretSvc)
 	settingsSvc, err := NewSettingsService(store.GetConfigDir())
 	if err != nil {
 		log.Fatal(err)
 	}
+	aiSvc := NewAIService(settingsSvc, dbSvc)
 
 	app := application.New(application.Options{
 		Name:        "TableFlux",
