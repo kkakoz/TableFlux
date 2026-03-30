@@ -205,3 +205,35 @@ type vaultState struct {
 	PasswordHash string            `json:"passwordHash"`
 	Secrets      map[string]string `json:"secrets"`
 }
+
+// Table schema related types
+type TableColumnSchema struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Nullable     bool   `json:"nullable"`
+	DefaultValue string `json:"defaultValue"`
+	PrimaryKey   bool   `json:"primaryKey"`
+	Unique       bool   `json:"unique"`
+	AutoIncrement bool  `json:"autoIncrement"`
+	Comment      string `json:"comment"`
+}
+
+type TableSchema struct {
+	Name        string              `json:"name"`
+	Database     string              `json:"database"`
+	Schema       string              `json:"schema"`
+	Engine       string              `json:"engine"`
+	Charset      string              `json:"charset"`
+	Collation    string              `json:"collation"`
+	Comment      string              `json:"comment"`
+	Columns      []TableColumnSchema `json:"columns"`
+	PrimaryKey   []string            `json:"primaryKey"`
+}
+
+type TableSchemaRequest struct {
+	ConnectionID string `json:"connectionId"`
+	Database     string `json:"database"`
+	Schema       string `json:"schema"`
+	Table        string `json:"table"`
+}
+

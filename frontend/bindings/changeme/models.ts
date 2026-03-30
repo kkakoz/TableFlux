@@ -690,6 +690,143 @@ export class SchemaObject {
     }
 }
 
+export class Settings {
+    /**
+     * light, dark, system
+     */
+    "theme": string;
+
+    /**
+     * zh-CN, en-US
+     */
+    "language": string;
+
+    /**
+     * 自动保存
+     */
+    "autoSave": boolean;
+
+    /**
+     * 自动保存延迟（秒）
+     */
+    "autoSaveDelay": number;
+
+    /**
+     * 查询结果行数限制
+     */
+    "queryLimit": number;
+
+    /**
+     * 查询超时（毫秒）
+     */
+    "queryTimeout": number;
+
+    /**
+     * 执行前确认
+     */
+    "confirmBefore": boolean;
+
+    /**
+     * 编辑器字体大小
+     */
+    "fontSize": number;
+
+    /**
+     * 编辑器字体
+     */
+    "fontFamily": string;
+
+    /**
+     * 显示行号
+     */
+    "showLineNumbers": boolean;
+
+    /**
+     * 自动换行
+     */
+    "wordWrap": boolean;
+
+    /**
+     * 制表符宽度
+     */
+    "tabSize": number;
+
+    /**
+     * AI 配置
+     * AI API Key
+     */
+    "aiApiKey": string;
+
+    /**
+     * AI API URL
+     */
+    "aiApiUrl": string;
+
+    /**
+     * AI Model Name
+     */
+    "aiModelName": string;
+
+    /** Creates a new Settings instance. */
+    constructor($$source: Partial<Settings> = {}) {
+        if (!("theme" in $$source)) {
+            this["theme"] = "";
+        }
+        if (!("language" in $$source)) {
+            this["language"] = "";
+        }
+        if (!("autoSave" in $$source)) {
+            this["autoSave"] = false;
+        }
+        if (!("autoSaveDelay" in $$source)) {
+            this["autoSaveDelay"] = 0;
+        }
+        if (!("queryLimit" in $$source)) {
+            this["queryLimit"] = 0;
+        }
+        if (!("queryTimeout" in $$source)) {
+            this["queryTimeout"] = 0;
+        }
+        if (!("confirmBefore" in $$source)) {
+            this["confirmBefore"] = false;
+        }
+        if (!("fontSize" in $$source)) {
+            this["fontSize"] = 0;
+        }
+        if (!("fontFamily" in $$source)) {
+            this["fontFamily"] = "";
+        }
+        if (!("showLineNumbers" in $$source)) {
+            this["showLineNumbers"] = false;
+        }
+        if (!("wordWrap" in $$source)) {
+            this["wordWrap"] = false;
+        }
+        if (!("tabSize" in $$source)) {
+            this["tabSize"] = 0;
+        }
+        if (!("aiApiKey" in $$source)) {
+            this["aiApiKey"] = "";
+        }
+        if (!("aiApiUrl" in $$source)) {
+            this["aiApiUrl"] = "";
+        }
+        if (!("aiModelName" in $$source)) {
+            this["aiModelName"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new Settings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): Settings {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new Settings($$parsedSource as Partial<Settings>);
+    }
+}
+
 export class StudioSessionSnapshot {
     "groupId": string;
     "activeConnectionId": string;
@@ -768,6 +905,58 @@ export class StudioTabSnapshot {
     }
 }
 
+/**
+ * Table schema related types
+ */
+export class TableColumnSchema {
+    "name": string;
+    "type": string;
+    "nullable": boolean;
+    "defaultValue": string;
+    "primaryKey": boolean;
+    "unique": boolean;
+    "autoIncrement": boolean;
+    "comment": string;
+
+    /** Creates a new TableColumnSchema instance. */
+    constructor($$source: Partial<TableColumnSchema> = {}) {
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("nullable" in $$source)) {
+            this["nullable"] = false;
+        }
+        if (!("defaultValue" in $$source)) {
+            this["defaultValue"] = "";
+        }
+        if (!("primaryKey" in $$source)) {
+            this["primaryKey"] = false;
+        }
+        if (!("unique" in $$source)) {
+            this["unique"] = false;
+        }
+        if (!("autoIncrement" in $$source)) {
+            this["autoIncrement"] = false;
+        }
+        if (!("comment" in $$source)) {
+            this["comment"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TableColumnSchema instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TableColumnSchema {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TableColumnSchema($$parsedSource as Partial<TableColumnSchema>);
+    }
+}
+
 export class TableQueryRequest {
     "connectionId": string;
     "database": string;
@@ -806,6 +995,100 @@ export class TableQueryRequest {
     static createFrom($$source: any = {}): TableQueryRequest {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new TableQueryRequest($$parsedSource as Partial<TableQueryRequest>);
+    }
+}
+
+export class TableSchema {
+    "name": string;
+    "database": string;
+    "schema": string;
+    "engine": string;
+    "charset": string;
+    "collation": string;
+    "comment": string;
+    "columns": TableColumnSchema[];
+    "primaryKey": string[];
+
+    /** Creates a new TableSchema instance. */
+    constructor($$source: Partial<TableSchema> = {}) {
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("database" in $$source)) {
+            this["database"] = "";
+        }
+        if (!("schema" in $$source)) {
+            this["schema"] = "";
+        }
+        if (!("engine" in $$source)) {
+            this["engine"] = "";
+        }
+        if (!("charset" in $$source)) {
+            this["charset"] = "";
+        }
+        if (!("collation" in $$source)) {
+            this["collation"] = "";
+        }
+        if (!("comment" in $$source)) {
+            this["comment"] = "";
+        }
+        if (!("columns" in $$source)) {
+            this["columns"] = [];
+        }
+        if (!("primaryKey" in $$source)) {
+            this["primaryKey"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TableSchema instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TableSchema {
+        const $$createField7_0 = $$createType6;
+        const $$createField8_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("columns" in $$parsedSource) {
+            $$parsedSource["columns"] = $$createField7_0($$parsedSource["columns"]);
+        }
+        if ("primaryKey" in $$parsedSource) {
+            $$parsedSource["primaryKey"] = $$createField8_0($$parsedSource["primaryKey"]);
+        }
+        return new TableSchema($$parsedSource as Partial<TableSchema>);
+    }
+}
+
+export class TableSchemaRequest {
+    "connectionId": string;
+    "database": string;
+    "schema": string;
+    "table": string;
+
+    /** Creates a new TableSchemaRequest instance. */
+    constructor($$source: Partial<TableSchemaRequest> = {}) {
+        if (!("connectionId" in $$source)) {
+            this["connectionId"] = "";
+        }
+        if (!("database" in $$source)) {
+            this["database"] = "";
+        }
+        if (!("schema" in $$source)) {
+            this["schema"] = "";
+        }
+        if (!("table" in $$source)) {
+            this["table"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TableSchemaRequest instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TableSchemaRequest {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TableSchemaRequest($$parsedSource as Partial<TableSchemaRequest>);
     }
 }
 
@@ -934,3 +1217,5 @@ const $$createType1 = $Create.Map($Create.Any, $Create.Any);
 const $$createType2 = $Create.Array($$createType1);
 const $$createType3 = StudioTabSnapshot.createFrom;
 const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = TableColumnSchema.createFrom;
+const $$createType6 = $Create.Array($$createType5);

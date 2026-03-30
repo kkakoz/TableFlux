@@ -507,6 +507,112 @@ func (s *DatabaseService) DeleteRows(req DeleteRowsRequest) (SQLExecutionResult,
 	return SQLExecutionResult{RowsAffected: total, Message: fmt.Sprintf("Deleted %d rows", total)}, nil
 }
 
+func (s *DatabaseService) GetTableSchema(req TableSchemaRequest) (TableSchema, error) {
+	if req.Table == "" {
+		return TableSchema{}, errors.New("table is required")
+	}
+	conn, db, err := s.getPool(req.ConnectionID, req.Database)
+	if err != nil {
+		return TableSchema{}, err
+	}
+
+	schema := TableSchema{
+		Name:    req.Table,
+		Database: req.Database,
+		Schema:   req.Schema,
+	}
+
+	var rows *sql.Rows
+	var schemaName string
+	if conn.Driver == "mysql" {
+		dbName := fallback(req.Database, conn.DefaultDB)
+		schemaName = dbName
+		query := `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT,
+				COLUMN_KEY, EXTRA, COLUMN_COMMENT
+				FROM information_schema.COLUMNS
+				WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+				ORDER BY ORDINAL_POSITION`
+		rows, err = db.Query(query, dbName, req.Table)
+	} else {
+		schemaName = fallback(req.Schema, "public")
+		query := `SELECT column_name, data_type, is_nullable, column_default, '', '', ''
+				FROM information_schema.columns
+				WHERE table_schema = $1 AND table_name = $2
+				ORDER BY ordinal_position`
+		rows, err = db.Query(query, schemaName, req.Table)
+	}
+	if err != nil {
+		return TableSchema{}, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var col TableColumnSchema
+		var nullableStr, extra, comment string
+		if conn.Driver == "mysql" {
+			if err := rows.Scan(&col.Name, &col.Type, &nullableStr, &col.DefaultValue,
+				new(string), &extra, &comment); err != nil {
+				return TableSchema{}, err
+			}
+		} else {
+			if err := rows.Scan(&col.Name, &col.Type, &nullableStr, &col.DefaultValue,
+				new(string), &extra, &comment); err != nil {
+				return TableSchema{}, err
+			}
+		}
+		col.Nullable = (nullableStr == "YES")
+		col.AutoIncrement = (extra == "auto_increment")
+		col.Comment = comment
+		schema.Columns = append(schema.Columns, col)
+	}
+
+	// Get primary key information
+	if conn.Driver == "mysql" {
+		dbName := fallback(req.Database, conn.DefaultDB)
+		query := `SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+				WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_NAME = 'PRIMARY'
+				ORDER BY ORDINAL_POSITION`
+		keyRows, err := db.Query(query, dbName, req.Table)
+		if err == nil {
+			defer keyRows.Close()
+			for keyRows.Next() {
+				var key string
+				if err := keyRows.Scan(&key); err == nil {
+					schema.PrimaryKey = append(schema.PrimaryKey, key)
+				}
+			}
+		}
+	} else {
+		schemaName = fallback(req.Schema, "public")
+		query := `SELECT a.attname FROM pg_index i
+				JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+				WHERE i.indrelid = (SELECT oid FROM pg_class WHERE relname = $1)
+				AND i.indisprimary`
+		keyRows, err := db.Query(query, req.Table)
+		if err == nil {
+			defer keyRows.Close()
+			for keyRows.Next() {
+				var key string
+				if err := keyRows.Scan(&key); err == nil {
+					schema.PrimaryKey = append(schema.PrimaryKey, key)
+				}
+			}
+		}
+	}
+
+	// Mark primary key columns
+	for i := range schema.Columns {
+		for _, pk := range schema.PrimaryKey {
+			if schema.Columns[i].Name == pk {
+				schema.Columns[i].PrimaryKey = true
+				break
+			}
+		}
+	}
+
+	return schema, nil
+}
+
 func (s *DatabaseService) MigrateTableData(req DataMigrationRequest) (DataMigrationResult, error) {
 	if req.SourceConnectionID == "" || req.TargetConnectionID == "" {
 		return DataMigrationResult{}, errors.New("sourceConnectionId and targetConnectionId are required")
@@ -628,9 +734,15 @@ func (s *DatabaseService) getPool(connectionID, overrideDB string) (ConnectionMe
 	if err != nil {
 		return ConnectionMeta{}, nil, err
 	}
-	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetMaxIdleConns(5)
-	db.SetMaxOpenConns(20)
+
+	// Optimized connection pool configuration
+	maxOpen := 50
+	maxIdle := 10
+	db.SetConnMaxLifetime(10 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetMaxOpenConns(maxOpen)
+
 	if err := db.Ping(); err != nil {
 		return ConnectionMeta{}, nil, err
 	}

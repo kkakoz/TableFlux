@@ -14,6 +14,7 @@ import (
 
 type DataStore struct {
 	mu        sync.Mutex
+	configDir string
 	statePath string
 	vaultPath string
 	state     appState
@@ -31,6 +32,7 @@ func NewDataStore(appName string) (*DataStore, error) {
 	}
 
 	ds := &DataStore{
+		configDir: baseDir,
 		statePath: filepath.Join(baseDir, "state.json"),
 		vaultPath: filepath.Join(baseDir, "vault.json"),
 		state: appState{
@@ -432,6 +434,10 @@ func fallback(s, def string) string {
 		return def
 	}
 	return s
+}
+
+func (ds *DataStore) GetConfigDir() string {
+	return ds.configDir
 }
 
 func normalizeDriver(driver string) string {

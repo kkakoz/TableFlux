@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"embed"
@@ -20,6 +20,11 @@ func main() {
 	dbSvc := NewDatabaseService(store, secretSvc)
 	studioSvc := NewStudioWindowService(store)
 	taskSvc := NewTaskService(store)
+	aiSvc := NewAIService(secretSvc)
+	settingsSvc, err := NewSettingsService(store.GetConfigDir())
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	app := application.New(application.Options{
 		Name:        "TableFlux",
@@ -30,6 +35,8 @@ func main() {
 			application.NewService(dbSvc),
 			application.NewService(studioSvc),
 			application.NewService(taskSvc),
+			application.NewService(aiSvc),
+			application.NewService(settingsSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

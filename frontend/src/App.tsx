@@ -18,6 +18,7 @@ import type {
   ExecuteSQLResult,
   WorkspaceGroup,
 } from "./types";
+import SettingsPanel from "./components/SettingsPanel";
 
 type ViewMode = "main" | "studio";
 type DbTreeNode = {
@@ -162,6 +163,7 @@ function MainView() {
     defaultDb: "",
   });
   const [message, setMessage] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const loadGroups = async () => {
     const list = await api.listGroups();
@@ -236,6 +238,9 @@ function MainView() {
           <h1>TableFlux 数据库客户端</h1>
           <p className="sub">按分组管理连接，按分组打开独立工作台</p>
         </div>
+        <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
+          ⚙ 设置
+        </button>
       </header>
 
       <main className="main-grid">
@@ -310,6 +315,8 @@ function MainView() {
       </main>
 
       {message && <p className="message">{message}</p>}
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
