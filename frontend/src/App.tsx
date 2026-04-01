@@ -232,86 +232,160 @@ function MainView() {
   };
 
   return (
-    <div className="app-shell light">
-      <header className="topbar">
-        <div>
-          <h1>TableFlux 数据库客户端</h1>
-          <p className="sub">按分组管理连接，按分组打开独立工作台</p>
+    <div className="app-shell light app-shell-workbench">
+      <header className="topbar topbar-workbench">
+        <div className="topbar-workbench-title">
+          <h1 className="topbar-workbench-h1">TableFlux</h1>
+          <p className="sub topbar-workbench-sub">工作区分组 · 独立工作台</p>
         </div>
-        <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
+        <button type="button" className="btn ghost btn-workbench-settings" onClick={() => setSettingsOpen(true)} title="设置">
           ⚙ 设置
         </button>
       </header>
 
-      <main className="main-grid">
-        <section className="panel">
-          <h2>连接分组</h2>
-          <form className="row" onSubmit={createGroup}>
-            <input value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="新分组名称" />
-            <button className="btn" type="submit">新增</button>
+      <main className="main-workbench">
+        <aside className="workspace-sidebar">
+          <div className="workspace-section-label">工作区</div>
+          <form className="workspace-inline-form" onSubmit={createGroup}>
+            <input
+              className="workspace-input"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder="新分组…"
+            />
+            <button className="btn btn-workbench-sm" type="submit">
+              新增
+            </button>
           </form>
-          <div className="list">
+          <div className="list list-workbench">
             {groups.map((g) => (
               <button
                 key={g.id}
-                className={`list-item ${selectedGroupId === g.id ? "active" : ""}`}
+                type="button"
+                className={`list-item list-item-workbench ${selectedGroupId === g.id ? "active" : ""}`}
                 onClick={() => setSelectedGroupId(g.id)}
               >
-                <span className="dot" style={{ backgroundColor: g.color }} />
-                <span>{g.name}</span>
+                <span className="dot dot-workbench" style={{ backgroundColor: g.color }} />
+                <span className="list-item-workbench-text">{g.name}</span>
               </button>
             ))}
           </div>
-          <button className="btn wide" disabled={!selectedGroupId} onClick={() => selectedGroupId && api.openGroupWindow(selectedGroupId)}>
-            打开当前分组工作台
+          <button
+            type="button"
+            className="btn btn-workbench-open"
+            disabled={!selectedGroupId}
+            onClick={() => selectedGroupId && api.openGroupWindow(selectedGroupId)}
+          >
+            打开工作台
           </button>
-        </section>
+        </aside>
 
-        <section className="panel">
-          <h2>数据库连接</h2>
-          <form onSubmit={createConnection} className="stack">
-            <input value={connForm.name} onChange={(e) => setConnForm({ ...connForm, name: e.target.value })} placeholder="连接名称" />
-            <div className="row">
-              <select
-                value={connForm.driver}
-                onChange={(e) => setConnForm({ ...connForm, driver: e.target.value, port: e.target.value === "postgres" ? 5432 : 3306 })}
-              >
-                <option value="mysql">MySQL</option>
-                <option value="postgres">PostgreSQL</option>
-              </select>
-              <input value={connForm.host} onChange={(e) => setConnForm({ ...connForm, host: e.target.value })} placeholder="主机" />
-              <input type="number" value={connForm.port} onChange={(e) => setConnForm({ ...connForm, port: Number(e.target.value) })} placeholder="端口" />
+        <div className="workspace-main">
+          <section className="panel panel-workbench">
+            <div className="workspace-section-head">
+              <h2 className="workspace-section-title">连接</h2>
+              <span className="workspace-section-meta">{selectedGroupId ? `${connections.length} 个` : "未选分组"}</span>
             </div>
-            <div className="row">
-              <input value={connForm.user} onChange={(e) => setConnForm({ ...connForm, user: e.target.value })} placeholder="用户" />
-              <input type="password" value={connForm.password} onChange={(e) => setConnForm({ ...connForm, password: e.target.value })} placeholder="密码" />
-              <input value={connForm.defaultDb} onChange={(e) => setConnForm({ ...connForm, defaultDb: e.target.value })} placeholder="默认数据库" />
-            </div>
-            <button className="btn" type="submit">保存连接</button>
-          </form>
-
-          <div className="list">
-            {connections.map((c) => (
-              <div className="conn-card" key={c.id}>
-                <div>
-                  <strong>{c.name}</strong>
-                  <p>{c.driver} · {c.host}:{c.port}</p>
-                </div>
-                <div className="row">
-                  <button className="btn ghost" onClick={() => api.testConnection(c.id).then(setMessage).catch((e) => setMessage(String(e)))}>
-                    测试
-                  </button>
-                  <button className="btn ghost" onClick={() => api.setConnectionFavorite(c.id, !c.favorite).then(() => loadConnections(selectedGroupId))}>
-                    {c.favorite ? "取消收藏" : "收藏"}
-                  </button>
-                  <button className="btn danger" onClick={() => api.deleteConnection(c.id).then(() => loadConnections(selectedGroupId))}>
-                    删除
-                  </button>
-                </div>
+            <form onSubmit={createConnection} className="stack stack-workbench">
+              <input
+                className="workspace-input"
+                value={connForm.name}
+                onChange={(e) => setConnForm({ ...connForm, name: e.target.value })}
+                placeholder="连接名称"
+              />
+              <div className="row row-workbench">
+                <select
+                  className="workspace-input"
+                  value={connForm.driver}
+                  onChange={(e) =>
+                    setConnForm({ ...connForm, driver: e.target.value, port: e.target.value === "postgres" ? 5432 : 3306 })
+                  }
+                >
+                  <option value="mysql">MySQL</option>
+                  <option value="postgres">PostgreSQL</option>
+                </select>
+                <input
+                  className="workspace-input"
+                  value={connForm.host}
+                  onChange={(e) => setConnForm({ ...connForm, host: e.target.value })}
+                  placeholder="主机"
+                />
+                <input
+                  className="workspace-input"
+                  type="number"
+                  value={connForm.port}
+                  onChange={(e) => setConnForm({ ...connForm, port: Number(e.target.value) })}
+                  placeholder="端口"
+                />
               </div>
-            ))}
-          </div>
-        </section>
+              <div className="row row-workbench">
+                <input
+                  className="workspace-input"
+                  value={connForm.user}
+                  onChange={(e) => setConnForm({ ...connForm, user: e.target.value })}
+                  placeholder="用户"
+                />
+                <input
+                  className="workspace-input"
+                  type="password"
+                  value={connForm.password}
+                  onChange={(e) => setConnForm({ ...connForm, password: e.target.value })}
+                  placeholder="密码"
+                />
+                <input
+                  className="workspace-input"
+                  value={connForm.defaultDb}
+                  onChange={(e) => setConnForm({ ...connForm, defaultDb: e.target.value })}
+                  placeholder="默认库"
+                />
+              </div>
+              <button className="btn btn-workbench-sm" type="submit">
+                保存连接
+              </button>
+            </form>
+
+            <div className="conn-list-workbench">
+              {connections.map((c) => (
+                <div className="conn-row-workbench" key={c.id}>
+                  <div className="conn-row-workbench-main">
+                    <div className="conn-row-workbench-title">
+                      <strong className="conn-row-workbench-name">{c.name}</strong>
+                      {c.favorite ? <span className="conn-row-pill">收藏</span> : null}
+                    </div>
+                    <span className="conn-row-workbench-meta">
+                      {c.driver} · {c.host}:{c.port}
+                    </span>
+                  </div>
+                  <div className="conn-row-workbench-actions">
+                    <button
+                      type="button"
+                      className="btn ghost btn-workbench-xs"
+                      onClick={() => api.testConnection(c.id).then(setMessage).catch((e) => setMessage(String(e)))}
+                    >
+                      测试
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost btn-workbench-xs"
+                      onClick={() =>
+                        api.setConnectionFavorite(c.id, !c.favorite).then(() => loadConnections(selectedGroupId))
+                      }
+                    >
+                      {c.favorite ? "取消" : "收藏"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn danger btn-workbench-xs"
+                      onClick={() => api.deleteConnection(c.id).then(() => loadConnections(selectedGroupId))}
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
       </main>
 
       {message && <p className="message">{message}</p>}
@@ -330,7 +404,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const [tabsByDatabase, setTabsByDatabase] = useState<Record<string, WorkbenchTab[]>>({});
   const [activeTabByDatabase, setActiveTabByDatabase] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
-  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarWidth, setSidebarWidth] = useState(272);
   const [editorHeight, setEditorHeight] = useState(340);
   const [menuOpen, setMenuOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -367,6 +441,7 @@ function StudioView({ groupId }: { groupId: string }) {
     relevantTables?: string[];
     reason?: string;
   } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
   const completionDisposableRef = useRef<IDisposable | null>(null);
@@ -1075,12 +1150,14 @@ function StudioView({ groupId }: { groupId: string }) {
 
   return (
     <div className="app-shell light studio-layout">
-      <aside className="sidebar sidebar-compact" style={{ width: `${sidebarWidth}px` }}>
+      <aside className="sidebar sidebar-compact sidebar-tool" style={{ width: `${sidebarWidth}px` }}>
         <div className="sidebar-head sidebar-head-compact">
-          <h2 className="sidebar-main-title">数据库</h2>
+          <h2 className="sidebar-main-title">对象</h2>
           <div className="sidebar-head-actions">
             <div className="top-menu-wrap">
-              <button className="btn ghost mini-menu-btn" type="button" onClick={() => setMenuOpen((v) => !v)}>☰ 菜单</button>
+              <button className="btn ghost mini-menu-btn" type="button" onClick={() => setMenuOpen((v) => !v)} title="菜单">
+                ☰
+              </button>
               {menuOpen && (
                 <div className="top-menu-panel">
                   <button
@@ -1201,10 +1278,26 @@ function StudioView({ groupId }: { groupId: string }) {
             <span className="sub studio-topbar-hint">Ctrl+L AI</span>
             <div className="studio-topbar-spacer" aria-hidden />
             <div className="row studio-topbar-actions">
-              <button type="button" className="btn btn-compact" onClick={() => runSQL("single")}>执行</button>
-              <button type="button" className="btn btn-compact" onClick={() => runSQL("batch")}>批量</button>
-              <button type="button" className="btn ghost btn-compact" onClick={explain}>计划</button>
-              <button type="button" className="btn ghost btn-compact" onClick={addTab}>新标签</button>
+              <button type="button" className="btn btn-compact" onClick={() => runSQL("single")}>
+                执行
+              </button>
+              <button type="button" className="btn btn-compact" onClick={() => runSQL("batch")}>
+                批量
+              </button>
+              <button type="button" className="btn ghost btn-compact" onClick={explain}>
+                计划
+              </button>
+              <button type="button" className="btn ghost btn-compact" onClick={addTab}>
+                新标签
+              </button>
+              <button
+                type="button"
+                className="btn ghost btn-compact"
+                title="设置"
+                onClick={() => setSettingsOpen(true)}
+              >
+                ⚙
+              </button>
             </div>
           </div>
         </header>
@@ -1481,6 +1574,8 @@ function StudioView({ groupId }: { groupId: string }) {
           </div>
         )}
       </section>
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
