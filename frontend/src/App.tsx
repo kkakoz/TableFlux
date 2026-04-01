@@ -331,7 +331,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const [activeTabByDatabase, setActiveTabByDatabase] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(300);
-  const [editorHeight, setEditorHeight] = useState(360);
+  const [editorHeight, setEditorHeight] = useState(340);
   const [menuOpen, setMenuOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRev, setHistoryRev] = useState(0);
@@ -391,6 +391,7 @@ function StudioView({ groupId }: { groupId: string }) {
     const c = connections.find((x) => x.id === activeConnectionId);
     return c?.driver === "postgres" ? "postgres" : "mysql";
   }, [connections, activeConnectionId]);
+  const activeConnMeta = connections.find((c) => c.id === activeConnectionId);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
   const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);
 
@@ -1034,7 +1035,10 @@ function StudioView({ groupId }: { groupId: string }) {
       if (!drag) return;
       if (drag.type === "sidebar") {
         const delta = e.clientX - drag.startX;
-        const next = Math.min(Math.max(220, drag.startWidth + delta), Math.max(420, window.innerWidth - 360));
+        const next = Math.min(
+          Math.max(280, drag.startWidth + delta),
+          Math.min(380, Math.max(320, window.innerWidth - 360)),
+        );
         setSidebarWidth(next);
       } else {
         const delta = e.clientY - drag.startY;
@@ -1071,15 +1075,16 @@ function StudioView({ groupId }: { groupId: string }) {
 
   return (
     <div className="app-shell light studio-layout">
-      <aside className="sidebar" style={{ width: `${sidebarWidth}px` }}>
-        <div className="sidebar-head">
+      <aside className="sidebar sidebar-compact" style={{ width: `${sidebarWidth}px` }}>
+        <div className="sidebar-head sidebar-head-compact">
           <h2 className="sidebar-main-title">数据库</h2>
           <div className="sidebar-head-actions">
             <div className="top-menu-wrap">
-              <button className="btn ghost mini-menu-btn" onClick={() => setMenuOpen((v) => !v)}>☰ 菜单</button>
+              <button className="btn ghost mini-menu-btn" type="button" onClick={() => setMenuOpen((v) => !v)}>☰ 菜单</button>
               {menuOpen && (
                 <div className="top-menu-panel">
                   <button
+                    type="button"
                     className="top-menu-item"
                     onClick={() => {
                       setHistoryOpen(true);
@@ -1089,6 +1094,7 @@ function StudioView({ groupId }: { groupId: string }) {
                     历史执行 SQL
                   </button>
                   <button
+                    type="button"
                     className="top-menu-item"
                     onClick={() => {
                       setMigrationOpen(true);
@@ -1100,28 +1106,14 @@ function StudioView({ groupId }: { groupId: string }) {
                 </div>
               )}
             </div>
-            <p className="sub">当前环境：{currentGroupName}</p>
+            <span className="sidebar-env" title={currentGroupName}>
+              {currentGroupName}
+            </span>
           </div>
         </div>
-        <div className="sidebar-object-head">
-          <h3>对象</h3>
-          <button className="btn ghost sidebar-refresh-btn" onClick={() => void reloadDbTree()} disabled={!activeConnectionId}>
-            ↻ 刷新
-          </button>
-        </div>
-        <div className="sidebar-object-divider" />
-        <label className="field-label">数据库连接</label>
-        <select className="connection-select" value={activeConnectionId} onChange={(e) => setActiveConnectionId(e.target.value)}>
-          <option value="">请选择连接</option>
-          {connections.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.driver})
-            </option>
-          ))}
-        </select>
 
         <div className="table-list-wrap">
-          <div className="table-title">数据库对象树</div>
+          <div className="table-title table-title-compact">对象树</div>
           <div className="table-list">
             {filteredTree.map((db) => {
               const expanded = db.forceExpanded || db.expanded;
@@ -1156,34 +1148,68 @@ function StudioView({ groupId }: { groupId: string }) {
             })}
           </div>
         </div>
-        <div className="sidebar-filter">
-          <label className="field-label">搜索过滤</label>
+        <div className="sidebar-filter sidebar-filter-compact">
           <input
             value={tableFilter}
             onChange={(e) => setTableFilter(e.target.value)}
-            placeholder="输入数据库或表名过滤"
+            placeholder="过滤库/表…"
+            aria-label="搜索过滤"
           />
         </div>
       </aside>
       <div className="pane-splitter vertical" onMouseDown={startSidebarResize} />
 
       <section className="studio-main">
-        <header className="topbar">
-          <div className="studio-title-wrap">
-            <div>
-            <h1>数据库控制台</h1>
-            <p className="sub">{selectedDatabase ? `数据库：${selectedDatabase}` : "请选择数据库开始"} · Ctrl+L AI 助手</p>
+        <header className="topbar studio-topbar">
+          <div className="studio-topbar-row">
+            <span
+              className={`conn-badge ${activeConnectionId ? "conn-badge-on" : ""}`}
+              title={activeConnMeta ? `${activeConnMeta.name} · ${activeConnMeta.host}:${activeConnMeta.port}` : undefined}
+            >
+              {activeConnectionId
+                ? activeConnMeta
+                  ? `${activeConnMeta.driver.toUpperCase()} · 就绪`
+                  : "已连接"
+                : "未连接"}
+            </span>
+            <select
+              className="connection-select connection-select-toolbar"
+              value={activeConnectionId}
+              onChange={(e) => setActiveConnectionId(e.target.value)}
+              aria-label="数据库连接"
+            >
+              <option value="">选择连接</option>
+              {connections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.driver})
+                </option>
+              ))}
+            </select>
+            <span className="studio-db-inline" title={selectedDatabase || undefined}>
+              {selectedDatabase ? `库 · ${selectedDatabase}` : "未选库"}
+            </span>
+            <button
+              type="button"
+              className="btn ghost btn-icon-tight"
+              onClick={() => void reloadDbTree()}
+              disabled={!activeConnectionId}
+              title="刷新对象树"
+            >
+              ↻
+            </button>
+            <h1 className="studio-heading">控制台</h1>
+            <span className="sub studio-topbar-hint">Ctrl+L AI</span>
+            <div className="studio-topbar-spacer" aria-hidden />
+            <div className="row studio-topbar-actions">
+              <button type="button" className="btn btn-compact" onClick={() => runSQL("single")}>执行</button>
+              <button type="button" className="btn btn-compact" onClick={() => runSQL("batch")}>批量</button>
+              <button type="button" className="btn ghost btn-compact" onClick={explain}>计划</button>
+              <button type="button" className="btn ghost btn-compact" onClick={addTab}>新标签</button>
             </div>
-          </div>
-          <div className="row">
-            <button className="btn" onClick={() => runSQL("single")}>执行</button>
-            <button className="btn" onClick={() => runSQL("batch")}>批量执行</button>
-            <button className="btn ghost" onClick={explain}>执行计划</button>
-            <button className="btn ghost" onClick={addTab}>新增标签</button>
           </div>
         </header>
 
-        <div className="tab-strip">
+        <div className="tab-strip tab-strip-compact">
           {visibleTabs.map((t) => (
             <button key={t.id} className={`tab ${t.id === activeTab?.id ? "active" : ""}`} onClick={() => setActiveForDatabase(selectedDatabase, t.id)}>
               <span>{t.type === "table" ? `表: ${t.title}` : t.title}</span>
@@ -1226,8 +1252,8 @@ function StudioView({ groupId }: { groupId: string }) {
         {showSqlResultPane && (
           <>
             <div className="pane-splitter horizontal" onMouseDown={startEditorResize} />
-            <section className="panel result-panel">
-              <h2>执行结果</h2>
+            <section className="panel result-panel result-panel-dense">
+              <h2 className="result-panel-title">执行结果</h2>
               {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
               {activeTabResult && (
                 <>
@@ -1251,8 +1277,8 @@ function StudioView({ groupId }: { groupId: string }) {
         )}
 
         {activeTab?.type === "table" && (
-          <section className="panel result-panel">
-            <h2>表数据</h2>
+          <section className="panel result-panel result-panel-dense">
+            <h2 className="result-panel-title">表数据</h2>
             {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
             {activeTabResult && (
               <>
