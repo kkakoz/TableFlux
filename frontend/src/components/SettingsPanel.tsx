@@ -3,13 +3,15 @@ import { SettingsService } from "../../bindings/changeme";
 import { useTheme } from "./ThemeProvider";
 import type { Settings as SettingsType, AIConfig } from "../types";
 import "./settings.css";
+import { DEFAULT_TIMEZONE, readDisplayTimezone, TIMEZONE_OPTIONS, writeDisplayTimezone } from "./studio/timezoneDisplay";
 
-type SettingsCategory = "general" | "editor" | "query" | "ai";
+type SettingsCategory = "general" | "editor" | "query" | "timezone" | "ai";
 
 const NAV_ITEMS: { id: SettingsCategory; label: string }[] = [
   { id: "general", label: "通用" },
   { id: "editor", label: "编辑器" },
   { id: "query", label: "查询" },
+  { id: "timezone", label: "时区" },
   { id: "ai", label: "AI" },
 ];
 
@@ -30,6 +32,7 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
     tabSize: 4,
   });
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
+  const [displayTimezone, setDisplayTimezone] = useState(() => readDisplayTimezone());
   const [aiConfig, setAiConfig] = useState<AIConfig>({
     apiKey: "",
     apiUrl: "",
@@ -68,6 +71,8 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
       localStorage.setItem("settings", JSON.stringify(settings));
       localStorage.setItem("tableflux.ai_enabled", aiEnabled ? "1" : "0");
       setTheme(settings.theme);
+      writeDisplayTimezone(displayTimezone || DEFAULT_TIMEZONE);
+      window.dispatchEvent(new CustomEvent("tableflux-timezone-change"));
 
       await SettingsService.SaveAIConfig(aiConfig.apiKey, aiConfig.apiUrl, aiConfig.modelName);
 
@@ -274,6 +279,31 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
                       <option value="300">5 分钟</option>
                     </select>
                   )}
+                </div>
+              </section>
+            )}
+
+            {activeCategory === "timezone" && (
+              <section className="settings-pane">
+                <h2 className="settings-pane-heading">时区</h2>
+                <p className="settings-pane-desc">用于查询结果中时间字段的展示与解释；不影响数据库存储。</p>
+                <div className="settings-field">
+                  <label className="settings-label" htmlFor="st-tz">
+                    显示时区
+                  </label>
+                  <span className="settings-hint">当前：{displayTimezone || DEFAULT_TIMEZONE}</span>
+                  <select
+                    id="st-tz"
+                    className="settings-control"
+                    value={displayTimezone}
+                    onChange={(e) => setDisplayTimezone(e.target.value)}
+                  >
+                    {TIMEZONE_OPTIONS.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </section>
             )}

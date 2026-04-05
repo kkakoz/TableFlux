@@ -12,6 +12,7 @@ import {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { editor as MonacoEditorNS, IDisposable, languages } from "monaco-editor";
+import { Database, History, Menu, RefreshCw, Settings2 } from "lucide-react";
 import { api } from "./api";
 import type {
   ConnectionMeta,
@@ -19,6 +20,9 @@ import type {
   WorkspaceGroup,
 } from "./types";
 import SettingsPanel from "./components/SettingsPanel";
+import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal";
+import { readDisplayTimezone } from "./components/studio/timezoneDisplay";
+import { SQL_EXECUTABLE_HINT, validateSqlExecutable } from "./utils/sqlExecutable";
 
 type ViewMode = "main" | "studio";
 type DbTreeNode = {
@@ -51,6 +55,14 @@ const createSqlTab = (index: number, connectionId: string, database: string): Wo
   result: null,
   error: "",
 });
+
+/** 为表名/列名加引号，避免保留字（如 order、user）导致语法错误 */
+function quoteSqlIdentifier(name: string, dialect: "mysql" | "postgres"): string {
+  if (dialect === "postgres") {
+    return `"${name.replace(/"/g, '""')}"`;
+  }
+  return `\`${name.replace(/`/g, "``")}\``;
+}
 
 const SQL_KEYWORDS = [
   "SELECT",
@@ -102,6 +114,7 @@ const gridTheme: Theme = {
 const GRID_ROW_HEIGHT = 32;
 const GRID_HEADER_HEIGHT = 34;
 const ROW_MARKER_WIDTH = 46;
+
 const SQL_HISTORY_KEY = "tableflux.sql_history";
 const SQL_HISTORY_LIMIT = 100;
 
@@ -442,6 +455,10 @@ function StudioView({ groupId }: { groupId: string }) {
     reason?: string;
   } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dbVisibilityOpen, setDbVisibilityOpen] = useState(false);
+  /** null：尚未从本地恢复，对象树暂显示全部库 */
+  const [visibleDbSet, setVisibleDbSet] = useState<Set<string> | null>(null);
+  const [displayTimezone, setDisplayTimezone] = useState(() => readDisplayTimezone());
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
   const completionDisposableRef = useRef<IDisposable | null>(null);
@@ -468,6 +485,10 @@ function StudioView({ groupId }: { groupId: string }) {
   }, [connections, activeConnectionId]);
   const activeConnMeta = connections.find((c) => c.id === activeConnectionId);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
+  const sqlExecState = useMemo(() => validateSqlExecutable(activeTab?.sql ?? ""), [activeTab?.sql]);
+  const envLabel = "测试";
+  const allDbNames = useMemo(() => dbTree.map((d) => d.name), [dbTree]);
+  const visibilitySetForModal = visibleDbSet ?? new Set(allDbNames);
   const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);
 
   const saveSession = async (nextTabs: WorkbenchTab[], nextConn: string) => {
@@ -650,6 +671,66 @@ function StudioView({ groupId }: { groupId: string }) {
     void reloadDbTree();
   }, [activeConnectionId, connections]);
 
+  const dbNamesKey = useMemo(() => dbTree.map((d) => d.name).sort().join("|"), [dbTree]);
+
+  useEffect(() => {
+    const onTz = () => setDisplayTimezone(readDisplayTimezone());
+    window.addEventListener("tableflux-timezone-change", onTz);
+    return () => window.removeEventListener("tableflux-timezone-change", onTz);
+  }, []);
+
+  useEffect(() => {
+    if (!activeConnectionId) {
+      setVisibleDbSet(null);
+      return;
+    }
+    if (!dbNamesKey) return;
+    const key = `tableflux.studio.visible_dbs:${activeConnectionId}`;
+    const names = dbTree.map((d) => d.name);
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      const all = new Set(names);
+      setVisibleDbSet(all);
+      try {
+        localStorage.setItem(key, JSON.stringify([...all]));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    try {
+      const arr = JSON.parse(raw) as string[];
+      const nameSet = new Set(names);
+      const next = new Set<string>();
+      for (const n of arr) {
+        if (nameSet.has(n)) next.add(n);
+      }
+      for (const n of names) {
+        if (!arr.includes(n)) next.add(n);
+      }
+      setVisibleDbSet(next);
+    } catch {
+      setVisibleDbSet(new Set(names));
+    }
+  }, [activeConnectionId, dbNamesKey, dbTree]);
+
+  const baseObjectTree = useMemo(() => {
+    if (visibleDbSet === null) return dbTree;
+    return dbTree.filter((d) => visibleDbSet.has(d.name));
+  }, [dbTree, visibleDbSet]);
+
+  const persistVisibleDbs = (next: Set<string>) => {
+    if (!activeConnectionId) return;
+    const key = `tableflux.studio.visible_dbs:${activeConnectionId}`;
+    try {
+      localStorage.setItem(key, JSON.stringify([...next]));
+    } catch {
+      /* ignore */
+    }
+    setVisibleDbSet(new Set(next));
+    setDbVisibilityOpen(false);
+  };
+
   const loadTablesForDB = async (dbName: string) => {
     if (!activeConnectionId || !dbName) return;
     const current = dbTree.find((d) => d.name === dbName);
@@ -718,9 +799,9 @@ function StudioView({ groupId }: { groupId: string }) {
   const filteredTree = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
     if (!q) {
-      return dbTree.map((d) => ({ ...d, visibleTables: d.tables, forceExpanded: false })).filter(Boolean);
+      return baseObjectTree.map((d) => ({ ...d, visibleTables: d.tables, forceExpanded: false })).filter(Boolean);
     }
-    return dbTree
+    return baseObjectTree
       .map((d) => {
         const dbMatched = d.name.toLowerCase().includes(q);
         const visibleTables = d.tables.filter((t) => t.toLowerCase().includes(q));
@@ -730,7 +811,7 @@ function StudioView({ groupId }: { groupId: string }) {
         return { ...d, visibleTables: dbMatched ? d.tables : visibleTables, forceExpanded: true };
       })
       .filter((d): d is DbTreeNode & { visibleTables: string[]; forceExpanded: boolean } => Boolean(d));
-  }, [dbTree, tableFilter]);
+  }, [baseObjectTree, tableFilter]);
 
   const upsertDatabaseTabs = (dbName: string, updater: (tabs: WorkbenchTab[]) => WorkbenchTab[]) => {
     if (!activeConnectionId) return;
@@ -763,6 +844,8 @@ function StudioView({ groupId }: { groupId: string }) {
     const key = `${activeConnectionId}::${dbName || "__none__"}`;
     const existed = tabsByDatabase[key]?.find((t) => t.type === "table" && t.contextTable === tableName);
     const tableTabId = existed?.id ?? crypto.randomUUID();
+    const tableSqlRef = quoteSqlIdentifier(tableName, sqlDialect);
+    const selectSql = `SELECT * FROM ${tableSqlRef};`;
     setTabsByDatabase((prev) => {
       const current = prev[key] ?? [createSqlTab(1, activeConnectionId, dbName)];
       if (existed) return prev;
@@ -770,7 +853,7 @@ function StudioView({ groupId }: { groupId: string }) {
         id: tableTabId,
         title: tableName,
         type: "table",
-        sql: `SELECT * FROM ${tableName}`,
+        sql: selectSql,
         connectionId: activeConnectionId,
         contextDb: dbName,
         contextTable: tableName,
@@ -785,7 +868,7 @@ function StudioView({ groupId }: { groupId: string }) {
         const r = await api.executeSQL({
           connectionId: activeConnectionId,
           database: dbName,
-          sql: `SELECT * FROM ${tableName}`,
+          sql: selectSql,
           mode: "single",
           rowLimit: 50000,
           timeoutMs: 30000,
@@ -830,6 +913,14 @@ function StudioView({ groupId }: { groupId: string }) {
     }
     const trimmed = (sqlText || "").trim();
     if (!trimmed) return;
+    const execCheck = validateSqlExecutable(trimmed);
+    if (!execCheck.ok) {
+      upsertDatabaseTabs(selectedDatabase, (list) =>
+        list.map((t) => (t.id === activeTab.id ? { ...t, error: execCheck.reason, result: null } : t)),
+      );
+      setError(execCheck.reason);
+      return;
+    }
     try {
       const r = await api.executeSQL({
         connectionId: activeConnectionId,
@@ -1149,249 +1240,388 @@ function StudioView({ groupId }: { groupId: string }) {
   };
 
   return (
-    <div className="app-shell light studio-layout">
-      <aside className="sidebar sidebar-compact sidebar-tool" style={{ width: `${sidebarWidth}px` }}>
-        <div className="sidebar-head sidebar-head-compact">
-          <h2 className="sidebar-main-title">对象</h2>
-          <div className="sidebar-head-actions">
-            <div className="top-menu-wrap">
-              <button className="btn ghost mini-menu-btn" type="button" onClick={() => setMenuOpen((v) => !v)} title="菜单">
-                ☰
-              </button>
-              {menuOpen && (
-                <div className="top-menu-panel">
-                  <button
-                    type="button"
-                    className="top-menu-item"
-                    onClick={() => {
-                      setHistoryOpen(true);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    历史执行 SQL
-                  </button>
-                  <button
-                    type="button"
-                    className="top-menu-item"
-                    onClick={() => {
-                      setMigrationOpen(true);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    数据迁移
-                  </button>
-                </div>
-              )}
+    <div className="tf-studio-root flex h-screen min-h-0 w-full flex-col overflow-hidden bg-slate-100 text-slate-900">
+      <div className="flex min-h-0 flex-1 flex-row">
+        <aside
+          className="flex min-h-0 w-[var(--sw)] shrink-0 flex-col border-r border-slate-200 bg-white"
+          style={{ ["--sw" as string]: `${sidebarWidth}px`, width: sidebarWidth }}
+        >
+          <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                <span className="rounded-tf bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600" title={currentGroupName}>
+                  {currentGroupName}
+                </span>
+              </div>
             </div>
-            <span className="sidebar-env" title={currentGroupName}>
-              {currentGroupName}
-            </span>
-          </div>
-        </div>
-
-        <div className="table-list-wrap">
-          <div className="table-title table-title-compact">对象树</div>
-          <div className="table-list">
-            {filteredTree.map((db) => {
-              const expanded = db.forceExpanded || db.expanded;
-              return (
-                <div key={db.name} className="tree-db-block">
-                  <div className={`tree-db-row ${selectedDatabase === db.name ? "active" : ""}`}>
-                    <button className="tree-toggle" onClick={() => toggleDatabaseExpand(db.name)}>
-                      {expanded ? "▾" : "▸"}
-                    </button>
-                    <button className="tree-db-name" onClick={() => selectDatabase(db.name)}>
-                      {db.name}
-                    </button>
-                  </div>
-                  {expanded && (
-                    <div className="tree-table-group">
-                      {db.visibleTables.length === 0 && (
-                        <div className="tree-empty">暂无表</div>
-                      )}
-                      {db.visibleTables.map((tableName) => (
-                        <button
-                          key={`${db.name}.${tableName}`}
-                          className="tree-table-item"
-                          onClick={() => appendSelectSQL(db.name, tableName)}
-                        >
-                          {tableName}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <div className="sidebar-filter sidebar-filter-compact">
-          <input
-            value={tableFilter}
-            onChange={(e) => setTableFilter(e.target.value)}
-            placeholder="过滤库/表…"
-            aria-label="搜索过滤"
-          />
-        </div>
-      </aside>
-      <div className="pane-splitter vertical" onMouseDown={startSidebarResize} />
-
-      <section className="studio-main">
-        <header className="topbar studio-topbar">
-          <div className="studio-topbar-row">
-            <span
-              className={`conn-badge ${activeConnectionId ? "conn-badge-on" : ""}`}
-              title={activeConnMeta ? `${activeConnMeta.name} · ${activeConnMeta.host}:${activeConnMeta.port}` : undefined}
-            >
-              {activeConnectionId
-                ? activeConnMeta
-                  ? `${activeConnMeta.driver.toUpperCase()} · 就绪`
-                  : "已连接"
-                : "未连接"}
-            </span>
-            <select
-              className="connection-select connection-select-toolbar"
-              value={activeConnectionId}
-              onChange={(e) => setActiveConnectionId(e.target.value)}
-              aria-label="数据库连接"
-            >
-              <option value="">选择连接</option>
-              {connections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.driver})
-                </option>
-              ))}
-            </select>
-            <span className="studio-db-inline" title={selectedDatabase || undefined}>
-              {selectedDatabase ? `库 · ${selectedDatabase}` : "未选库"}
-            </span>
-            <button
-              type="button"
-              className="btn ghost btn-icon-tight"
-              onClick={() => void reloadDbTree()}
-              disabled={!activeConnectionId}
-              title="刷新对象树"
-            >
-              ↻
-            </button>
-            <h1 className="studio-heading">控制台</h1>
-            <span className="sub studio-topbar-hint">Ctrl+L AI</span>
-            <div className="studio-topbar-spacer" aria-hidden />
-            <div className="row studio-topbar-actions">
-              <button type="button" className="btn btn-compact" onClick={() => runSQL("single")}>
-                执行
-              </button>
-              <button type="button" className="btn btn-compact" onClick={() => runSQL("batch")}>
-                批量
-              </button>
-              <button type="button" className="btn ghost btn-compact" onClick={explain}>
-                计划
-              </button>
-              <button type="button" className="btn ghost btn-compact" onClick={addTab}>
-                新标签
-              </button>
+            <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
-                className="btn ghost btn-compact"
-                title="设置"
-                onClick={() => setSettingsOpen(true)}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                title="管理左侧展示的数据库"
+                onClick={() => setDbVisibilityOpen(true)}
+                disabled={!activeConnectionId}
               >
-                ⚙
+                <Database className="h-3.5 w-3.5 text-blue-600" strokeWidth={2} />
+                管理展示库
               </button>
-            </div>
-          </div>
-        </header>
-
-        <div className="tab-strip tab-strip-compact">
-          {visibleTabs.map((t) => (
-            <button key={t.id} className={`tab ${t.id === activeTab?.id ? "active" : ""}`} onClick={() => setActiveForDatabase(selectedDatabase, t.id)}>
-              <span>{t.type === "table" ? `表: ${t.title}` : t.title}</span>
-              <span
-                className="tab-close"
-                role="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTab(t.id);
-                }}
-              >
-                ×
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {activeTab?.type === "sql" && (
-          <div
-            className="editor-wrap studio-editor-pane"
-            style={showSqlResultPane ? { height: `${editorHeight}px` } : { flex: 1, minHeight: 0 }}
-          >
-            <Editor
-              height="100%"
-              language="sql"
-              value={activeTab?.sql ?? ""}
-              onChange={(v) => setTabSQL(v ?? "")}
-              onMount={onEditorMount}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                wordWrap: "on",
-                automaticLayout: true,
-                suggestOnTriggerCharacters: true,
-              }}
-            />
-          </div>
-        )}
-
-        {showSqlResultPane && (
-          <>
-            <div className="pane-splitter horizontal" onMouseDown={startEditorResize} />
-            <section className="panel result-panel result-panel-dense">
-              <h2 className="result-panel-title">执行结果</h2>
-              {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
-              {activeTabResult && (
-                <>
-                  <p className="sub">{activeTabResult.message}（{activeTabResult.durationMs}ms）</p>
-                  {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
-                    <pre className="log">{activeTabResult.execLog.join("\n")}</pre>
-                  )}
-                  {activeTabResult.rows && activeTabResult.rows.length > 0 && (
-                    <div className="result-content">
-                      <VirtualResultGrid
-                        columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
-                        rows={activeTabResult.rows as Array<Record<string, unknown>>}
-                        onCopyError={(msg) => setError(msg)}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-            </section>
-          </>
-        )}
-
-        {activeTab?.type === "table" && (
-          <section className="panel result-panel result-panel-dense">
-            <h2 className="result-panel-title">表数据</h2>
-            {(activeTabError || error) && <p className="message error">{activeTabError || error}</p>}
-            {activeTabResult && (
-              <>
-                <p className="sub">{activeTabResult.message}（{activeTabResult.durationMs}ms）</p>
-                {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
-                  <pre className="log">{activeTabResult.execLog.join("\n")}</pre>
-                )}
-                {activeTabResult.rows && activeTabResult.rows.length > 0 && (
-                  <div className="result-content">
-                    <VirtualResultGrid
-                      columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
-                      rows={activeTabResult.rows as Array<Record<string, unknown>>}
-                      onCopyError={(msg) => setError(msg)}
-                    />
+              <div className="relative">
+                <button
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-600 hover:bg-slate-100"
+                  type="button"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  title="菜单"
+                >
+                  <Menu className="h-4 w-4" strokeWidth={2} />
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 z-40 mt-1 w-44 overflow-hidden rounded-tf border border-slate-200 bg-white py-1 text-xs shadow-lg">
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-2 text-left hover:bg-slate-50"
+                      onClick={() => {
+                        setHistoryOpen(true);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      历史执行 SQL
+                    </button>
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-2 text-left hover:bg-slate-50"
+                      onClick={() => {
+                        setMigrationOpen(true);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      数据迁移
+                    </button>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-auto px-1 py-2">
+            <div className="px-2 pb-1 text-[11px] font-semibold text-slate-500">对象树</div>
+            <div className="space-y-0.5">
+              {filteredTree.map((db) => {
+                const expanded = db.forceExpanded || db.expanded;
+                return (
+                  <div key={db.name} className="rounded-tf border border-transparent">
+                    <div
+                      className={`flex items-center gap-0.5 rounded-tf px-1 py-0.5 ${
+                        selectedDatabase === db.name ? "bg-blue-50 ring-1 ring-blue-100" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        className="w-6 shrink-0 rounded text-xs text-slate-500 hover:bg-slate-100"
+                        onClick={() => void toggleDatabaseExpand(db.name)}
+                      >
+                        {expanded ? "▾" : "▸"}
+                      </button>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 truncate rounded px-1 py-1 text-left font-mono text-xs font-medium text-slate-800 hover:bg-white/60"
+                        onClick={() => void selectDatabase(db.name)}
+                      >
+                        {db.name}
+                      </button>
+                    </div>
+                    {expanded && (
+                      <div className="ml-4 border-l border-slate-200 pl-2">
+                        {db.visibleTables.length === 0 && <div className="py-1 text-[11px] text-slate-400">暂无表</div>}
+                        {db.visibleTables.map((tableName) => (
+                          <button
+                            key={`${db.name}.${tableName}`}
+                            type="button"
+                            className="block w-full truncate rounded px-2 py-1 text-left font-mono text-[11px] text-slate-700 hover:bg-slate-100"
+                            onClick={() => appendSelectSQL(db.name, tableName)}
+                          >
+                            {tableName}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="shrink-0 border-t border-slate-200 p-2">
+            <input
+              className="w-full rounded-tf border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-800 outline-none ring-blue-500/30 focus:border-blue-300 focus:ring-2"
+              value={tableFilter}
+              onChange={(e) => setTableFilter(e.target.value)}
+              placeholder="过滤库/表…"
+              aria-label="搜索过滤"
+            />
+          </div>
+        </aside>
+        <div
+          className="w-1 shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-300/60"
+          onMouseDown={startSidebarResize}
+          title="拖拽调整侧栏宽度"
+        />
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-slate-100">
+          <section className="flex min-h-0 flex-1 flex-col border-l border-slate-200 bg-white shadow-sm">
+            <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ${
+                  activeConnectionId ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100" : "bg-slate-100 text-slate-500"
+                }`}
+                title={activeConnMeta ? `${activeConnMeta.name} · ${activeConnMeta.host}:${activeConnMeta.port}` : undefined}
+              >
+                {activeConnectionId ? (activeConnMeta ? `${activeConnMeta.driver.toUpperCase()} · 就绪` : "已连接") : "未连接"}
+              </span>
+              <select
+                className="max-w-[220px] rounded-tf border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800"
+                value={activeConnectionId}
+                onChange={(e) => setActiveConnectionId(e.target.value)}
+                aria-label="数据库连接"
+              >
+                <option value="">选择连接</option>
+                {connections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.driver})
+                  </option>
+                ))}
+              </select>
+              <span className="max-w-[200px] truncate text-xs text-slate-600" title={selectedDatabase || undefined}>
+                {activeConnMeta ? `${activeConnMeta.name} (${activeConnMeta.driver})` : "未选连接"}
+              </span>
+              <span className="max-w-[160px] truncate text-xs text-slate-500" title={selectedDatabase || undefined}>
+                {selectedDatabase ? `当前库 · ${selectedDatabase}` : "未选库"}
+              </span>
+              <button
+                type="button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                onClick={() => void reloadDbTree()}
+                disabled={!activeConnectionId}
+                title="刷新对象树"
+              >
+                <RefreshCw className="h-4 w-4" strokeWidth={2} />
+              </button>
+              <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                <span className="hidden text-[11px] text-slate-400 lg:inline">Ctrl+R 执行 · Ctrl+L AI</span>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center rounded-md border border-blue-200 bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-500"
+                  onClick={() => void runSQL("single")}
+                  disabled={!sqlExecState.ok || !activeConnectionId || activeTab?.type !== "sql"}
+                  title={!sqlExecState.ok ? SQL_EXECUTABLE_HINT : "执行 (Ctrl+R)"}
+                >
+                  执行
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  onClick={() => void runSQL("batch")}
+                  disabled={!sqlExecState.ok || !activeConnectionId || activeTab?.type !== "sql"}
+                  title="批量执行"
+                >
+                  批量
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => void explain()}
+                >
+                  计划
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={addTab}
+                >
+                  新标签
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => setHistoryOpen(true)}
+                  title="历史执行 SQL"
+                >
+                  <History className="h-3.5 w-3.5" strokeWidth={2} />
+                  历史
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  title="设置"
+                  onClick={() => setSettingsOpen(true)}
+                >
+                  <Settings2 className="h-4 w-4" strokeWidth={2} />
+                </button>
+              </div>
+            </header>
+
+            <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50/80 px-2 py-1.5">
+              {visibleTabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`group inline-flex max-w-[200px] items-center gap-1 rounded-md border px-2 py-1 text-xs ${
+                    t.id === activeTab?.id
+                      ? "border-blue-200 bg-white text-blue-800 shadow-sm"
+                      : "border-transparent bg-transparent text-slate-600 hover:bg-white"
+                  }`}
+                  onClick={() => setActiveForDatabase(selectedDatabase, t.id)}
+                >
+                  <span className="truncate">{t.type === "table" ? `表 · ${t.title}` : t.title}</span>
+                  <span
+                    className="rounded px-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    role="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeTab(t.id);
+                    }}
+                  >
+                    ×
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {activeTab?.type === "sql" && (
+              <div className="flex min-h-0 flex-1 flex-col">
+                {!sqlExecState.ok && (
+                  <div className="shrink-0 border-b border-amber-100 bg-amber-50/90 px-3 py-1.5 text-[11px] text-amber-900">
+                    {SQL_EXECUTABLE_HINT}
+                  </div>
+                )}
+                <div
+                  className="min-h-0 flex-1 bg-white"
+                  style={showSqlResultPane ? { height: `${editorHeight}px` } : { flex: 1, minHeight: 0 }}
+                >
+                  <Editor
+                    height="100%"
+                    language="sql"
+                    value={activeTab?.sql ?? ""}
+                    onChange={(v) => setTabSQL(v ?? "")}
+                    onMount={onEditorMount}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 14,
+                      wordWrap: "on",
+                      automaticLayout: true,
+                      suggestOnTriggerCharacters: true,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {showSqlResultPane && (
+              <>
+                <div
+                  className="h-1 shrink-0 cursor-row-resize bg-slate-200 hover:bg-blue-300/60"
+                  onMouseDown={startEditorResize}
+                  title="拖拽调整编辑器/结果高度"
+                />
+                <section className="flex min-h-[200px] flex-1 flex-col gap-2 overflow-hidden border-t border-slate-200 bg-slate-50/40 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">执行结果</h2>
+                    <p className="text-[11px] text-slate-500">
+                      时区展示：<span className="font-mono text-slate-700">{displayTimezone}</span>
+                    </p>
+                  </div>
+                  {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
+                  {activeTabResult && (
+                    <>
+                      <p className="text-xs text-slate-600">
+                        {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                      </p>
+                      {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
+                        <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
+                          {activeTabResult.execLog.join("\n")}
+                        </pre>
+                      )}
+                      {activeTabResult.rows && activeTabResult.rows.length > 0 && (
+                        <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
+                          <VirtualResultGrid
+                            columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                            rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                            onCopyError={(msg) => setError(msg)}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </section>
               </>
             )}
+
+            {activeTab?.type === "table" && (
+              <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">表数据</h2>
+                  <p className="text-[11px] text-slate-500">
+                    时区展示：<span className="font-mono text-slate-700">{displayTimezone}</span>
+                  </p>
+                </div>
+                {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
+                {activeTabResult && (
+                  <>
+                    <p className="text-xs text-slate-600">
+                      {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                    </p>
+                    {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
+                      <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
+                        {activeTabResult.execLog.join("\n")}
+                      </pre>
+                    )}
+                    {activeTabResult.rows && activeTabResult.rows.length > 0 && (
+                      <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
+                        <VirtualResultGrid
+                          columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                          rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                          onCopyError={(msg) => setError(msg)}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
           </section>
-        )}
+
+          <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-500">
+            <span>
+              连接：
+              <span className="font-mono text-slate-700">
+                {activeConnMeta ? `${activeConnMeta.name} (${activeConnMeta.driver})` : "—"}
+              </span>
+            </span>
+            <span>
+              当前库：<span className="font-mono text-slate-700">{selectedDatabase || "—"}</span>
+            </span>
+            <span>
+              时区：<span className="font-mono text-slate-700">{displayTimezone}</span>
+            </span>
+            <span>
+              方言：<span className="font-mono text-slate-700">{sqlDialect}</span>
+            </span>
+            <span>
+              耗时：
+              <span className="font-mono text-slate-700">{activeTabResult?.durationMs != null ? `${activeTabResult.durationMs}ms` : "—"}</span>
+            </span>
+            <span>
+              行数：<span className="font-mono text-slate-700">{activeTabResult?.rows?.length ?? "—"}</span>
+            </span>
+          </footer>
+        </div>
+      </div>
+
+      <DatabaseVisibilityModal
+        open={dbVisibilityOpen}
+        allDatabaseNames={allDbNames}
+        visible={visibilitySetForModal}
+        onClose={() => setDbVisibilityOpen(false)}
+        onSave={(next) => persistVisibleDbs(next)}
+      />
 
         {historyOpen && (
           <div className="modal-mask" onClick={() => setHistoryOpen(false)}>
@@ -1573,7 +1803,6 @@ function StudioView({ groupId }: { groupId: string }) {
             </div>
           </div>
         )}
-      </section>
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
@@ -1594,7 +1823,7 @@ function VirtualResultGrid({
   const [gridSize, setGridSize] = useState({ width: 900, height: 360 });
   const [ctxMenu, setCtxMenu] = useState<{ left: number; top: number } | null>(null);
   const gridHostRef = useRef<HTMLDivElement | null>(null);
-  const dataEditorRef = useRef<DataEditorRef>(null);
+  const dataEditorRef = useRef<DataEditorRef | null>(null);
   const lastContextClientPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
@@ -1640,7 +1869,7 @@ function VirtualResultGrid({
 
   const gridColumns: GridColumn[] = useMemo(
     () => columns.map((name) => ({ title: name, id: name, width: 180 })),
-    [columns]
+    [columns],
   );
 
   const getCellContent = useMemo(() => {
@@ -1706,9 +1935,15 @@ function VirtualResultGrid({
       </div>
       {rows.length > PAGE_SIZE && (
         <div className="result-pager">
-          <button className="btn ghost" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>上一页</button>
-          <span>第 {safePage} / {totalPages} 页（每页 {PAGE_SIZE} 条）</span>
-          <button className="btn ghost" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>下一页</button>
+          <button className="btn ghost" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+            上一页
+          </button>
+          <span>
+            第 {safePage} / {totalPages} 页（每页 {PAGE_SIZE} 条）
+          </span>
+          <button className="btn ghost" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+            下一页
+          </button>
         </div>
       )}
       {ctxMenu ? (
@@ -1719,7 +1954,7 @@ function VirtualResultGrid({
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <button className="context-menu-item" onClick={() => { void copySelection(); setCtxMenu(null); }}>
+          <button className="context-menu-item" onClick={() => void copySelection().then(() => setCtxMenu(null))}>
             复制
           </button>
         </div>

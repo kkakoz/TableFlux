@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@theme {
+  --radius-tf: 7px;
+}
+
+/* Studio 工作台：避免全局主题 CSS 影响 Monaco 容器高度 */
+.tf-studio-root .monaco-editor,
+.tf-studio-root .monaco-editor-background {
+  background-color: #ffffff !important;
+}
