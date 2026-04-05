@@ -472,6 +472,9 @@ function StudioView({ groupId }: { groupId: string }) {
     | { type: "editor"; startY: number; startHeight: number }
     | null
   >(null);
+  /** 仅用于「库名列表变化」时合并新库进可见集；勿随 dbTree 引用变化而重置（展开/收起会改 dbTree） */
+  const visibleDbNamesKeyRef = useRef<string>("");
+  const visibleDbSyncConnIdRef = useRef<string | null>(null);
 
   const databaseTabKey = `${activeConnectionId}::${selectedDatabase || "__none__"}`;
   const visibleTabs = tabsByDatabase[databaseTabKey] ?? [];
@@ -681,37 +684,53 @@ function StudioView({ groupId }: { groupId: string }) {
   useEffect(() => {
     if (!activeConnectionId) {
       setVisibleDbSet(null);
+      visibleDbSyncConnIdRef.current = null;
+      visibleDbNamesKeyRef.current = "";
       return;
     }
     if (!dbNamesKey) return;
-    const key = `tableflux.studio.visible_dbs:${activeConnectionId}`;
-    const names = dbTree.map((d) => d.name);
-    const raw = localStorage.getItem(key);
+
+    if (visibleDbSyncConnIdRef.current !== activeConnectionId) {
+      visibleDbSyncConnIdRef.current = activeConnectionId;
+      visibleDbNamesKeyRef.current = "";
+    }
+
+    const names = dbNamesKey.split("|").filter(Boolean);
+    const nameSet = new Set(names);
+    const storageKey = `tableflux.studio.visible_dbs:${activeConnectionId}`;
+    const raw = localStorage.getItem(storageKey);
+    const prevNamesKey = visibleDbNamesKeyRef.current;
+
     if (!raw) {
       const all = new Set(names);
       setVisibleDbSet(all);
       try {
-        localStorage.setItem(key, JSON.stringify([...all]));
+        localStorage.setItem(storageKey, JSON.stringify([...all]));
       } catch {
         /* ignore */
       }
+      visibleDbNamesKeyRef.current = dbNamesKey;
       return;
     }
     try {
       const arr = JSON.parse(raw) as string[];
-      const nameSet = new Set(names);
       const next = new Set<string>();
       for (const n of arr) {
         if (nameSet.has(n)) next.add(n);
       }
-      for (const n of names) {
-        if (!arr.includes(n)) next.add(n);
+      if (prevNamesKey && prevNamesKey !== dbNamesKey) {
+        const prevNames = new Set(prevNamesKey.split("|").filter(Boolean));
+        for (const n of names) {
+          if (!prevNames.has(n)) next.add(n);
+        }
       }
+      visibleDbNamesKeyRef.current = dbNamesKey;
       setVisibleDbSet(next);
     } catch {
       setVisibleDbSet(new Set(names));
+      visibleDbNamesKeyRef.current = dbNamesKey;
     }
-  }, [activeConnectionId, dbNamesKey, dbTree]);
+  }, [activeConnectionId, dbNamesKey]);
 
   const baseObjectTree = useMemo(() => {
     if (visibleDbSet === null) return dbTree;
@@ -728,6 +747,7 @@ function StudioView({ groupId }: { groupId: string }) {
     }
     setVisibleDbSet(new Set(next));
     setDbVisibilityOpen(false);
+    visibleDbNamesKeyRef.current = dbNamesKey;
   };
 
   const loadTablesForDB = async (dbName: string) => {
@@ -1296,7 +1316,7 @@ function StudioView({ groupId }: { groupId: string }) {
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto px-1 py-2">
-            <div className="px-2 pb-1 text-[11px] font-semibold text-slate-500">对象树</div>
+            {/*<div className="px-2 pb-1 text-[11px] font-semibold text-slate-500">对象树</div>*/}
             <div className="space-y-0.5">
               {filteredTree.map((db) => {
                 const expanded = db.forceExpanded || db.expanded;
@@ -1320,7 +1340,7 @@ function StudioView({ groupId }: { groupId: string }) {
                           <button
                             key={`${db.name}.${tableName}`}
                             type="button"
-                            className="block w-full truncate rounded px-2 py-1 text-left font-mono text-[11px] text-slate-700 hover:bg-slate-100"
+                            className="block w-full truncate rounded px-2 py-1 text-left font-mono text-xs font-medium text-slate-800 hover:bg-slate-100"
                             onClick={() => appendSelectSQL(db.name, tableName)}
                           >
                             {tableName}
