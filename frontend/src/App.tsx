@@ -486,7 +486,6 @@ function StudioView({ groupId }: { groupId: string }) {
   const activeConnMeta = connections.find((c) => c.id === activeConnectionId);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
   const sqlExecState = useMemo(() => validateSqlExecutable(activeTab?.sql ?? ""), [activeTab?.sql]);
-  const envLabel = "测试";
   const allDbNames = useMemo(() => dbTree.map((d) => d.name), [dbTree]);
   const visibilitySetForModal = visibleDbSet ?? new Set(allDbNames);
   const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);
@@ -771,6 +770,8 @@ function StudioView({ groupId }: { groupId: string }) {
   }, [activeConnectionId, selectedDatabase, databaseTabKey]);
 
   const toggleDatabaseExpand = async (dbName: string) => {
+    const target = dbTree.find((d) => d.name === dbName);
+    const willExpand = target ? !target.expanded : true;
     let shouldLoad = false;
     setDbTree((prev) =>
       prev.map((d) => {
@@ -780,18 +781,10 @@ function StudioView({ groupId }: { groupId: string }) {
         return { ...d, expanded: nextExpanded };
       })
     );
+    if (willExpand) {
+      setSelectedDatabase(dbName);
+    }
     if (shouldLoad) {
-      await loadTablesForDB(dbName);
-    }
-  };
-
-  const selectDatabase = async (dbName: string) => {
-    setSelectedDatabase(dbName);
-    const target = dbTree.find((d) => d.name === dbName);
-    if (!target?.expanded) {
-      setDbTree((prev) => prev.map((d) => (d.name === dbName ? { ...d, expanded: true } : d)));
-    }
-    if (!target?.loaded) {
       await loadTablesForDB(dbName);
     }
   };
@@ -1309,26 +1302,17 @@ function StudioView({ groupId }: { groupId: string }) {
                 const expanded = db.forceExpanded || db.expanded;
                 return (
                   <div key={db.name} className="rounded-tf border border-transparent">
-                    <div
-                      className={`flex items-center gap-0.5 rounded-tf px-1 py-0.5 ${
+                    <button
+                      type="button"
+                      className={`flex w-full items-center gap-0.5 rounded-tf px-1 py-1 text-left ${
                         selectedDatabase === db.name ? "bg-blue-50 ring-1 ring-blue-100" : "hover:bg-slate-50"
                       }`}
+                      onClick={() => void toggleDatabaseExpand(db.name)}
+                      title={expanded ? "收起表列表" : "展开表列表"}
                     >
-                      <button
-                        type="button"
-                        className="w-6 shrink-0 rounded text-xs text-slate-500 hover:bg-slate-100"
-                        onClick={() => void toggleDatabaseExpand(db.name)}
-                      >
-                        {expanded ? "▾" : "▸"}
-                      </button>
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 truncate rounded px-1 py-1 text-left font-mono text-xs font-medium text-slate-800 hover:bg-white/60"
-                        onClick={() => void selectDatabase(db.name)}
-                      >
-                        {db.name}
-                      </button>
-                    </div>
+                      <span className="w-6 shrink-0 select-none text-xs text-slate-500">{expanded ? "▾" : "▸"}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-slate-800">{db.name}</span>
+                    </button>
                     {expanded && (
                       <div className="ml-4 border-l border-slate-200 pl-2">
                         {db.visibleTables.length === 0 && <div className="py-1 text-[11px] text-slate-400">暂无表</div>}
