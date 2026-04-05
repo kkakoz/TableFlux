@@ -1,5 +1,4 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Editor from "@monaco-editor/react";
 import {
   DataEditor,
   GridCellKind,
@@ -22,7 +21,8 @@ import type {
 import SettingsPanel from "./components/SettingsPanel";
 import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal";
 import { readDisplayTimezone } from "./components/studio/timezoneDisplay";
-import { SQL_EXECUTABLE_HINT, validateSqlExecutable } from "./utils/sqlExecutable";
+import SqlEditorWithGutter from "./components/studio/SqlEditorWithGutter";
+import { findStatementAtLine, parseSqlStatements } from "./utils/sqlStatements";
 
 type ViewMode = "main" | "studio";
 type DbTreeNode = {
@@ -488,7 +488,6 @@ function StudioView({ groupId }: { groupId: string }) {
   }, [connections, activeConnectionId]);
   const activeConnMeta = connections.find((c) => c.id === activeConnectionId);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
-  const sqlExecState = useMemo(() => validateSqlExecutable(activeTab?.sql ?? ""), [activeTab?.sql]);
   const allDbNames = useMemo(() => dbTree.map((d) => d.name), [dbTree]);
   const visibilitySetForModal = visibleDbSet ?? new Set(allDbNames);
   const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);
@@ -913,27 +912,10 @@ function StudioView({ groupId }: { groupId: string }) {
     });
   }, [tableFilter, dbTree]);
 
-  const runSQL = async (mode: "single" | "batch") => {
+  const executeSqlForActiveTab = async (sql: string, mode: "single" | "batch") => {
     if (!activeConnectionId || !activeTab) return;
-    let sqlText = activeTab.sql;
-    const ed = monacoEditorRef.current;
-    if (ed) {
-      const model = ed.getModel();
-      const sel = ed.getSelection();
-      if (model && sel && !sel.isEmpty()) {
-        sqlText = model.getValueInRange(sel);
-      }
-    }
-    const trimmed = (sqlText || "").trim();
+    const trimmed = (sql || "").trim();
     if (!trimmed) return;
-    const execCheck = validateSqlExecutable(trimmed);
-    if (!execCheck.ok) {
-      upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, error: execCheck.reason, result: null } : t)),
-      );
-      setError(execCheck.reason);
-      return;
-    }
     try {
       const r = await api.executeSQL({
         connectionId: activeConnectionId,
@@ -955,6 +937,27 @@ function StudioView({ groupId }: { groupId: string }) {
       );
       setError(String(e));
     }
+  };
+
+  const runSQL = async (mode: "single" | "batch") => {
+    if (!activeConnectionId || !activeTab) return;
+    let sqlText = activeTab.sql;
+    const ed = monacoEditorRef.current;
+    if (ed) {
+      const model = ed.getModel();
+      const sel = ed.getSelection();
+      if (model && sel && !sel.isEmpty()) {
+        sqlText = model.getValueInRange(sel);
+      } else if (model && mode === "single") {
+        const pos = ed.getPosition();
+        if (pos) {
+          const stmts = parseSqlStatements(model.getValue());
+          const stmt = findStatementAtLine(stmts, pos.lineNumber);
+          if (stmt) sqlText = stmt.sql;
+        }
+      }
+    }
+    await executeSqlForActiveTab(sqlText, mode);
   };
 
   const addTab = () => {
@@ -1414,8 +1417,8 @@ function StudioView({ groupId }: { groupId: string }) {
                   type="button"
                   className="inline-flex h-8 items-center rounded-md border border-blue-200 bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-500"
                   onClick={() => void runSQL("single")}
-                  disabled={!sqlExecState.ok || !activeConnectionId || activeTab?.type !== "sql"}
-                  title={!sqlExecState.ok ? SQL_EXECUTABLE_HINT : "执行 (Ctrl+R)"}
+                  disabled={!activeConnectionId || activeTab?.type !== "sql"}
+                  title="执行选中 / 光标所在语句 (Ctrl+R)"
                 >
                   执行
                 </button>
@@ -1423,8 +1426,8 @@ function StudioView({ groupId }: { groupId: string }) {
                   type="button"
                   className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                   onClick={() => void runSQL("batch")}
-                  disabled={!sqlExecState.ok || !activeConnectionId || activeTab?.type !== "sql"}
-                  title="批量执行"
+                  disabled={!activeConnectionId || activeTab?.type !== "sql"}
+                  title="批量执行当前编辑器全文"
                 >
                   批量
                 </button>
@@ -1491,28 +1494,17 @@ function StudioView({ groupId }: { groupId: string }) {
 
             {activeTab?.type === "sql" && (
               <div className="flex min-h-0 flex-1 flex-col">
-                {!sqlExecState.ok && (
-                  <div className="shrink-0 border-b border-amber-100 bg-amber-50/90 px-3 py-1.5 text-[11px] text-amber-900">
-                    {SQL_EXECUTABLE_HINT}
-                  </div>
-                )}
                 <div
                   className="min-h-0 flex-1 bg-white"
                   style={showSqlResultPane ? { height: `${editorHeight}px` } : { flex: 1, minHeight: 0 }}
                 >
-                  <Editor
+                  <SqlEditorWithGutter
                     height="100%"
-                    language="sql"
                     value={activeTab?.sql ?? ""}
                     onChange={(v) => setTabSQL(v ?? "")}
                     onMount={onEditorMount}
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                      wordWrap: "on",
-                      automaticLayout: true,
-                      suggestOnTriggerCharacters: true,
-                    }}
+                    executeDisabled={!activeConnectionId}
+                    onExecuteStatement={(sql) => void executeSqlForActiveTab(sql, "single")}
                   />
                 </div>
               </div>
