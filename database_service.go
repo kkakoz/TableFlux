@@ -105,6 +105,7 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 		if err != nil {
 			return SQLExecutionResult{}, err
 		}
+		displayCols := disambiguateQueryColumns(cols)
 		resultRows := make([]map[string]any, 0)
 		truncated := false
 		for rows.Next() {
@@ -121,8 +122,8 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 				return SQLExecutionResult{}, err
 			}
 			row := make(map[string]any, len(cols))
-			for i, c := range cols {
-				row[c] = normalizeValue(values[i])
+			for i := range cols {
+				row[displayCols[i]] = normalizeValue(values[i])
 			}
 			resultRows = append(resultRows, row)
 		}
@@ -134,7 +135,7 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 			message = fmt.Sprintf("Query finished (%d rows, truncated by row limit)", len(resultRows))
 		}
 		return SQLExecutionResult{
-			Columns:    cols,
+			Columns:    displayCols,
 			Rows:       resultRows,
 			Message:    message,
 			Truncated:  truncated,
@@ -366,6 +367,7 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 	if err != nil {
 		return QueryResultPage{}, err
 	}
+	displayCols := disambiguateQueryColumns(cols)
 	resultRows := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(cols))
@@ -377,8 +379,8 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 			return QueryResultPage{}, err
 		}
 		item := map[string]any{}
-		for i, c := range cols {
-			item[c] = normalizeValue(values[i])
+		for i := range cols {
+			item[displayCols[i]] = normalizeValue(values[i])
 		}
 		resultRows = append(resultRows, item)
 	}
@@ -393,7 +395,7 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 			return QueryResultPage{}, err
 		}
 	}
-	return QueryResultPage{Columns: cols, Rows: resultRows, Total: total, Offset: req.Offset, Limit: req.Limit}, nil
+	return QueryResultPage{Columns: displayCols, Rows: resultRows, Total: total, Offset: req.Offset, Limit: req.Limit}, nil
 }
 
 func (s *DatabaseService) InsertRows(req InsertRowsRequest) (SQLExecutionResult, error) {
@@ -778,7 +780,7 @@ func buildDSN(conn ConnectionMeta, password, db string) string {
 		}
 		return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", conn.User, password, conn.Host, conn.Port, db, sslMode)
 	}
-	params := "parseTime=true&multiStatements=true"
+	params := "parseTime=true&multiStatements=true&columnsWithAlias=true"
 	if db == "" {
 		db = "mysql"
 	}
@@ -810,6 +812,67 @@ func normalizeValue(v any) any {
 	default:
 		return t
 	}
+}
+
+// splitQualifiedColumnName 解析驱动返回的「表.列」形式列名（如 MySQL columnsWithAlias）。
+func splitQualifiedColumnName(raw string) (table, col string, ok bool) {
+	i := strings.LastIndex(raw, ".")
+	if i <= 0 || i >= len(raw)-1 {
+		return "", "", false
+	}
+	table = strings.Trim(raw[:i], "`\"")
+	col = strings.Trim(raw[i+1:], "`\"")
+	if table == "" || col == "" {
+		return "", "", false
+	}
+	return table, col, true
+}
+
+// disambiguateQueryColumns 为重复列名生成唯一展示名（亦作为 JSON/表格 map 的键）：同名列显示为「列名 (表名)」；
+// 若仅有裸列名重复（如部分驱动下的 JOIN），则使用「列名 (序号)」区分。
+func disambiguateQueryColumns(raw []string) []string {
+	n := len(raw)
+	display := make([]string, n)
+	if n == 0 {
+		return display
+	}
+	shortNames := make([]string, n)
+	qualified := make([]bool, n)
+	tables := make([]string, n)
+	for i, r := range raw {
+		t, c, ok := splitQualifiedColumnName(r)
+		if ok {
+			qualified[i] = true
+			tables[i] = t
+			shortNames[i] = c
+		} else {
+			shortNames[i] = r
+		}
+	}
+	counts := make(map[string]int, n)
+	for _, s := range shortNames {
+		counts[s]++
+	}
+	dupBare := make(map[string]int)
+	for i := range raw {
+		sn := shortNames[i]
+		if counts[sn] <= 1 {
+			if qualified[i] {
+				display[i] = sn
+			} else {
+				display[i] = raw[i]
+			}
+			continue
+		}
+		if qualified[i] {
+			display[i] = fmt.Sprintf("%s (%s)", sn, tables[i])
+			continue
+		}
+		dupBare[sn]++
+		k := dupBare[sn]
+		display[i] = fmt.Sprintf("%s (%d)", sn, k)
+	}
+	return display
 }
 
 func quoteIdentifier(driver, name string) string {
