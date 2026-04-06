@@ -1886,6 +1886,8 @@ function VirtualResultGrid({
   const [ctxMenu, setCtxMenu] = useState<{ left: number; top: number } | null>(null);
   const [sortMenu, setSortMenu] = useState<{ colIndex: number; bounds: HeaderBounds } | null>(null);
   const [cellDetail, setCellDetail] = useState<{ column: string; rowLabel: string; text: string } | null>(null);
+  /** 列拖拽调整后的宽度；列集合变化时重置为默认 */
+  const [columnWidths, setColumnWidths] = useState<number[]>([]);
   const gridHostRef = useRef<HTMLDivElement | null>(null);
   const dataEditorRef = useRef<DataEditorRef | null>(null);
   const lastContextClientPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -1903,6 +1905,12 @@ function VirtualResultGrid({
   useEffect(() => {
     setPage(1);
   }, [rows, columns.join("|"), serverMode]);
+
+  const columnsSig = columns.join("|");
+  const defaultColWidth = 180;
+  useEffect(() => {
+    setColumnWidths(columns.map(() => defaultColWidth));
+  }, [columnsSig]);
 
   useEffect(() => {
     const el = gridHostRef.current;
@@ -1957,6 +1965,11 @@ function VirtualResultGrid({
 
   const markerStart = serverMode ? rowNumberStart : pageStart + 1;
 
+  const resolvedColumnWidths = useMemo(() => {
+    if (columnWidths.length === columns.length) return columnWidths;
+    return Array.from({ length: columns.length }, () => defaultColWidth);
+  }, [columnsSig, columnWidths, columns.length]);
+
   const openCellDetail = useCallback(
     (cell: Item) => {
       const [c, r] = cell;
@@ -1981,8 +1994,8 @@ function VirtualResultGrid({
 
   const gridColumns: GridColumn[] = useMemo(
     () =>
-      columns.map((name) => {
-        const base: GridColumn = { title: name, id: name, width: 180 };
+      columns.map((name, i) => {
+        const base: GridColumn = { title: name, id: name, width: resolvedColumnWidths[i] ?? defaultColWidth };
         if (serverMode && onSortOrder) {
           return {
             ...base,
@@ -1992,7 +2005,19 @@ function VirtualResultGrid({
         }
         return base;
       }),
-    [columns, serverMode, onSortOrder],
+    [columns, resolvedColumnWidths, serverMode, onSortOrder],
+  );
+
+  const onColumnResize = useCallback(
+    (_column: GridColumn, newSize: number, colIndex: number) => {
+      setColumnWidths((prev) => {
+        const len = columns.length;
+        const next = prev.length === len ? [...prev] : columns.map(() => defaultColWidth);
+        next[colIndex] = newSize;
+        return next;
+      });
+    },
+    [columns],
   );
 
   const getCellContent = useMemo(() => {
@@ -2057,6 +2082,8 @@ function VirtualResultGrid({
           rowSelectionMode="multi"
           smoothScrollX
           smoothScrollY
+          overscrollX={16}
+          onColumnResize={onColumnResize}
           onHeaderMenuClick={
             serverMode && onSortOrder
               ? (colIndex, bounds: HeaderBounds) => {
