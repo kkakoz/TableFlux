@@ -37,6 +37,8 @@ type WorkbenchTab = {
   title: string;
   type: "sql" | "table";
   sql: string;
+  /** 最近一次执行/解释所用的 SQL（用于底部状态栏展示） */
+  lastExecutedSql: string;
   connectionId: string;
   contextDb: string;
   contextTable: string;
@@ -49,6 +51,7 @@ const createSqlTab = (index: number, connectionId: string, database: string): Wo
   title: `查询 ${index}`,
   type: "sql",
   sql: "",
+  lastExecutedSql: "",
   connectionId,
   contextDb: database,
   contextTable: "",
@@ -532,6 +535,7 @@ function StudioView({ groupId }: { groupId: string }) {
           title: t.title,
           type: t.contextTable ? "table" : "sql",
           sql: t.sql,
+          lastExecutedSql: "",
           connectionId: t.connectionId,
           contextDb: t.contextDb,
           contextTable: t.contextTable,
@@ -866,6 +870,7 @@ function StudioView({ groupId }: { groupId: string }) {
         title: tableName,
         type: "table",
         sql: selectSql,
+        lastExecutedSql: "",
         connectionId: activeConnectionId,
         contextDb: dbName,
         contextTable: tableName,
@@ -889,7 +894,7 @@ function StudioView({ groupId }: { groupId: string }) {
           const list = prev[key] ?? [];
           return {
             ...prev,
-            [key]: list.map((t) => (t.id === tableTabId ? { ...t, result: r, error: "" } : t)),
+            [key]: list.map((t) => (t.id === tableTabId ? { ...t, result: r, error: "", lastExecutedSql: selectSql } : t)),
           };
         });
       } catch (e) {
@@ -897,7 +902,7 @@ function StudioView({ groupId }: { groupId: string }) {
           const list = prev[key] ?? [];
           return {
             ...prev,
-            [key]: list.map((t) => (t.id === tableTabId ? { ...t, error: String(e), result: null } : t)),
+            [key]: list.map((t) => (t.id === tableTabId ? { ...t, error: String(e), result: null, lastExecutedSql: selectSql } : t)),
           };
         });
       }
@@ -928,12 +933,12 @@ function StudioView({ groupId }: { groupId: string }) {
       pushSqlHistory(trimmed);
       setHistoryRev((n) => n + 1);
       upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "" } : t))
+        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "", lastExecutedSql: trimmed } : t))
       );
       setError("");
     } catch (e) {
       upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, error: String(e), result: null } : t))
+        list.map((t) => (t.id === activeTab.id ? { ...t, error: String(e), result: null, lastExecutedSql: trimmed } : t))
       );
       setError(String(e));
     }
@@ -1073,9 +1078,10 @@ function StudioView({ groupId }: { groupId: string }) {
   const explain = async () => {
     if (!activeConnectionId || !activeTab) return;
     try {
+      const explainSql = `EXPLAIN ${activeTab.sql.trim()}`;
       const r = await api.explainSQL({ connectionId: activeConnectionId, database: selectedDatabase, sql: activeTab.sql });
       upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "" } : t))
+        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "", lastExecutedSql: explainSql } : t))
       );
       setError("");
     } catch (e) {
@@ -1593,29 +1599,25 @@ function StudioView({ groupId }: { groupId: string }) {
             )}
           </section>
 
-          <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-500">
-            <span>
-              连接：
-              <span className="font-mono text-slate-700">
-                {activeConnMeta ? `${activeConnMeta.name} (${activeConnMeta.driver})` : "—"}
+          <footer className="flex min-h-[32px] shrink-0 items-center justify-between gap-3 border-t border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-500">
+            <div
+              className="min-w-0 flex-1 truncate font-mono text-[11px] leading-snug text-slate-700"
+              title={activeTab?.lastExecutedSql || undefined}
+            >
+              {activeTab?.lastExecutedSql ? activeTab.lastExecutedSql : "—"}
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-4 gap-y-1">
+              <span>
+                时区：<span className="font-mono text-slate-700">{displayTimezone}</span>
               </span>
-            </span>
-            <span>
-              当前库：<span className="font-mono text-slate-700">{selectedDatabase || "—"}</span>
-            </span>
-            <span>
-              时区：<span className="font-mono text-slate-700">{displayTimezone}</span>
-            </span>
-            <span>
-              方言：<span className="font-mono text-slate-700">{sqlDialect}</span>
-            </span>
-            <span>
-              耗时：
-              <span className="font-mono text-slate-700">{activeTabResult?.durationMs != null ? `${activeTabResult.durationMs}ms` : "—"}</span>
-            </span>
-            <span>
-              行数：<span className="font-mono text-slate-700">{activeTabResult?.rows?.length ?? "—"}</span>
-            </span>
+              <span>
+                耗时：
+                <span className="font-mono text-slate-700">{activeTabResult?.durationMs != null ? `${activeTabResult.durationMs}ms` : "—"}</span>
+              </span>
+              <span>
+                行数：<span className="font-mono text-slate-700">{activeTabResult?.rows?.length ?? "—"}</span>
+              </span>
+            </div>
           </footer>
         </div>
       </div>
