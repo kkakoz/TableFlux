@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SettingsService } from "../../bindings/changeme";
+import { SettingsService, Settings as WailsSettings } from "../../bindings/changeme";
 import { useTheme } from "./ThemeProvider";
 import type { Settings as SettingsType, AIConfig } from "../types";
 import "./settings.css";
@@ -74,7 +74,25 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
       writeDisplayTimezone(displayTimezone || DEFAULT_TIMEZONE);
       window.dispatchEvent(new CustomEvent("tableflux-timezone-change"));
 
-      await SettingsService.SaveAIConfig(aiConfig.apiKey, aiConfig.apiUrl, aiConfig.modelName);
+      await SettingsService.UpdateSettings(
+        new WailsSettings({
+          theme: settings.theme,
+          language: settings.language,
+          autoSave: settings.autoSave,
+          autoSaveDelay: settings.autoSaveDelay,
+          queryLimit: settings.queryLimit,
+          queryTimeout: settings.queryTimeout,
+          confirmBefore: settings.confirmBefore,
+          fontSize: settings.fontSize,
+          fontFamily: settings.fontFamily,
+          showLineNumbers: settings.showLineNumbers,
+          wordWrap: settings.wordWrap,
+          tabSize: settings.tabSize,
+          aiApiKey: aiConfig.apiKey,
+          aiApiUrl: aiConfig.apiUrl,
+          aiModelName: aiConfig.modelName,
+        }),
+      );
 
       alert("设置已保存");
     } catch (error) {
@@ -83,7 +101,7 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     const defaults: SettingsType = {
       theme: "light",
       language: "zh-CN",
@@ -105,6 +123,11 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
     setAiConfig({ apiKey: "", apiUrl: "", modelName: "" });
     setAiEnabled(true);
     localStorage.removeItem("tableflux.ai_enabled");
+    try {
+      await SettingsService.ResetSettings();
+    } catch (e) {
+      console.error("ResetSettings:", e);
+    }
   };
 
   useEffect(() => {

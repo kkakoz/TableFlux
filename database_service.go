@@ -342,12 +342,53 @@ func (s *DatabaseService) ExplainSQL(req ExplainSQLRequest) (SQLExecutionResult,
 	return s.ExecuteSQL(req2)
 }
 
+const maxTablePageLimit = 50000
+
+func tableQueryColumnNames(db *sql.DB, tableRef string) ([]string, error) {
+	r, err := db.Query(fmt.Sprintf("SELECT * FROM %s LIMIT 0", tableRef))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return r.Columns()
+}
+
+func orderByExprForTableQuery(driver, rawCol string) string {
+	if t, c, ok := splitQualifiedColumnName(rawCol); ok {
+		return quoteIdentifier(driver, t) + "." + quoteIdentifier(driver, c)
+	}
+	return quoteIdentifier(driver, strings.Trim(rawCol, "`\""))
+}
+
+func buildTableQueryOrderClause(driver string, rawCols, displayCols []string, orderBy string, orderDesc bool) string {
+	orderBy = strings.TrimSpace(orderBy)
+	if orderBy == "" {
+		return ""
+	}
+	idx := -1
+	for i, d := range displayCols {
+		if d == orderBy {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 || idx >= len(rawCols) {
+		return ""
+	}
+	dir := "ASC"
+	if orderDesc {
+		dir = "DESC"
+	}
+	return " ORDER BY " + orderByExprForTableQuery(driver, rawCols[idx]) + " " + dir
+}
+
 func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage, error) {
+	started := time.Now()
 	if req.Limit <= 0 {
 		req.Limit = 100
 	}
-	if req.Limit > 1000 {
-		req.Limit = 1000
+	if req.Limit > maxTablePageLimit {
+		req.Limit = maxTablePageLimit
 	}
 	if req.Offset < 0 {
 		req.Offset = 0
@@ -357,7 +398,13 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 		return QueryResultPage{}, err
 	}
 	tableRef := tableRef(conn.Driver, req.Schema, req.Table)
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", tableRef, req.Limit, req.Offset)
+	rawCols, err := tableQueryColumnNames(db, tableRef)
+	if err != nil {
+		return QueryResultPage{}, err
+	}
+	displayCols := disambiguateQueryColumns(rawCols)
+	orderClause := buildTableQueryOrderClause(conn.Driver, rawCols, displayCols, req.OrderBy, req.OrderDesc)
+	query := fmt.Sprintf("SELECT * FROM %s%s LIMIT %d OFFSET %d", tableRef, orderClause, req.Limit, req.Offset)
 	rows, err := db.Query(query)
 	if err != nil {
 		return QueryResultPage{}, err
@@ -367,7 +414,7 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 	if err != nil {
 		return QueryResultPage{}, err
 	}
-	displayCols := disambiguateQueryColumns(cols)
+	displayCols = disambiguateQueryColumns(cols)
 	resultRows := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(cols))
@@ -395,7 +442,14 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 			return QueryResultPage{}, err
 		}
 	}
-	return QueryResultPage{Columns: displayCols, Rows: resultRows, Total: total, Offset: req.Offset, Limit: req.Limit}, nil
+	return QueryResultPage{
+		Columns:    displayCols,
+		Rows:       resultRows,
+		Total:      total,
+		Offset:     req.Offset,
+		Limit:      req.Limit,
+		DurationMs: time.Since(started).Milliseconds(),
+	}, nil
 }
 
 func (s *DatabaseService) InsertRows(req InsertRowsRequest) (SQLExecutionResult, error) {
@@ -519,7 +573,7 @@ func (s *DatabaseService) GetTableSchema(req TableSchemaRequest) (TableSchema, e
 	}
 
 	schema := TableSchema{
-		Name:    req.Table,
+		Name:     req.Table,
 		Database: req.Database,
 		Schema:   req.Schema,
 	}
@@ -809,6 +863,8 @@ func normalizeValue(v any) any {
 	switch t := v.(type) {
 	case []byte:
 		return string(t)
+	case time.Time:
+		return t.UTC().Format(time.RFC3339Nano)
 	default:
 		return t
 	}

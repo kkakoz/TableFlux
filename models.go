@@ -91,11 +91,12 @@ type SQLExecutionResult struct {
 }
 
 type QueryResultPage struct {
-	Columns []string         `json:"columns"`
-	Rows    []map[string]any `json:"rows"`
-	Total   int              `json:"total"`
-	Offset  int              `json:"offset"`
-	Limit   int              `json:"limit"`
+	Columns    []string         `json:"columns"`
+	Rows       []map[string]any `json:"rows"`
+	Total      int              `json:"total"`
+	Offset     int              `json:"offset"`
+	Limit      int              `json:"limit"`
+	DurationMs int64            `json:"durationMs"`
 }
 
 type TableQueryRequest struct {
@@ -105,6 +106,8 @@ type TableQueryRequest struct {
 	Table        string `json:"table"`
 	Offset       int    `json:"offset"`
 	Limit        int    `json:"limit"`
+	OrderBy      string `json:"orderBy"`
+	OrderDesc    bool   `json:"orderDesc"`
 }
 
 type ExplainSQLRequest struct {
@@ -208,26 +211,26 @@ type vaultState struct {
 
 // Table schema related types
 type TableColumnSchema struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Nullable     bool   `json:"nullable"`
-	DefaultValue string `json:"defaultValue"`
-	PrimaryKey   bool   `json:"primaryKey"`
-	Unique       bool   `json:"unique"`
-	AutoIncrement bool  `json:"autoIncrement"`
-	Comment      string `json:"comment"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Nullable      bool   `json:"nullable"`
+	DefaultValue  string `json:"defaultValue"`
+	PrimaryKey    bool   `json:"primaryKey"`
+	Unique        bool   `json:"unique"`
+	AutoIncrement bool   `json:"autoIncrement"`
+	Comment       string `json:"comment"`
 }
 
 type TableSchema struct {
-	Name        string              `json:"name"`
-	Database     string              `json:"database"`
-	Schema       string              `json:"schema"`
-	Engine       string              `json:"engine"`
-	Charset      string              `json:"charset"`
-	Collation    string              `json:"collation"`
-	Comment      string              `json:"comment"`
-	Columns      []TableColumnSchema `json:"columns"`
-	PrimaryKey   []string            `json:"primaryKey"`
+	Name       string              `json:"name"`
+	Database   string              `json:"database"`
+	Schema     string              `json:"schema"`
+	Engine     string              `json:"engine"`
+	Charset    string              `json:"charset"`
+	Collation  string              `json:"collation"`
+	Comment    string              `json:"comment"`
+	Columns    []TableColumnSchema `json:"columns"`
+	PrimaryKey []string            `json:"primaryKey"`
 }
 
 type TableSchemaRequest struct {
@@ -254,4 +257,3 @@ type AssistResponse struct {
 	RelevantTables []string `json:"relevantTables,omitempty"`
 	Reason         string   `json:"reason,omitempty"`
 }
-

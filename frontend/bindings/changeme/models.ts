@@ -618,6 +618,7 @@ export class QueryResultPage {
     "total": number;
     "offset": number;
     "limit": number;
+    "durationMs": number;
 
     /** Creates a new QueryResultPage instance. */
     constructor($$source: Partial<QueryResultPage> = {}) {
@@ -635,6 +636,9 @@ export class QueryResultPage {
         }
         if (!("limit" in $$source)) {
             this["limit"] = 0;
+        }
+        if (!("durationMs" in $$source)) {
+            this["durationMs"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -1037,6 +1041,8 @@ export class TableQueryRequest {
     "table": string;
     "offset": number;
     "limit": number;
+    "orderBy": string;
+    "orderDesc": boolean;
 
     /** Creates a new TableQueryRequest instance. */
     constructor($$source: Partial<TableQueryRequest> = {}) {
@@ -1057,6 +1063,12 @@ export class TableQueryRequest {
         }
         if (!("limit" in $$source)) {
             this["limit"] = 0;
+        }
+        if (!("orderBy" in $$source)) {
+            this["orderBy"] = "";
+        }
+        if (!("orderDesc" in $$source)) {
+            this["orderDesc"] = false;
         }
 
         Object.assign(this, $$source);

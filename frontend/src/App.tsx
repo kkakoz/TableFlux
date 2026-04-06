@@ -1,7 +1,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   DataEditor,
   GridCellKind,
+  GridColumnMenuIcon,
   getDefaultTheme,
   type DataEditorRef,
   type GridColumn,
@@ -21,7 +23,8 @@ import type {
 } from "./types";
 import SettingsPanel from "./components/SettingsPanel";
 import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal";
-import { readDisplayTimezone } from "./components/studio/timezoneDisplay";
+import { formatCellForTimezone, readDisplayTimezone } from "./components/studio/timezoneDisplay";
+import { TableQueryRequest } from "../bindings/changeme";
 import SqlEditorWithGutter from "./components/studio/SqlEditorWithGutter";
 import { findStatementAtLine, parseSqlStatements, splitStatementsBySemicolon } from "./utils/sqlStatements";
 import {
@@ -50,6 +53,14 @@ type WorkbenchTab = {
   contextTable: string;
   result: ExecuteSQLResult | null;
   error: string;
+  /** 表标签页：SELECT COUNT(*) 总行数 */
+  tableTotal?: number;
+  /** 当前页 offset */
+  tableOffset?: number;
+  /** 当前页 limit（与设置 queryLimit 一致） */
+  tablePageLimit?: number;
+  tableSortColumn?: string;
+  tableSortDesc?: boolean;
 };
 
 const createSqlTab = (index: number, connectionId: string, database: string): WorkbenchTab => ({
@@ -71,6 +82,56 @@ function quoteSqlIdentifier(name: string, dialect: "mysql" | "postgres"): string
     return `"${name.replace(/"/g, '""')}"`;
   }
   return `\`${name.replace(/`/g, "``")}\``;
+}
+
+function queryResultPageToExecuteSQLResult(page: {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  durationMs: number;
+}): ExecuteSQLResult {
+  return {
+    columns: page.columns,
+    rows: page.rows,
+    rowsAffected: 0,
+    lastInsertId: 0,
+    message: `表数据（本页 ${page.rows.length} 行）`,
+    truncated: false,
+    durationMs: Number(page.durationMs) || 0,
+  };
+}
+
+function buildTableBrowseSqlDisplay(
+  tableName: string,
+  dialect: "mysql" | "postgres",
+  orderBy: string,
+  orderDesc: boolean,
+  limit: number,
+  offset: number,
+): string {
+  const t = quoteSqlIdentifier(tableName, dialect);
+  let order = "";
+  if (orderBy.trim()) {
+    const c = quoteSqlIdentifier(orderBy, dialect);
+    order = ` ORDER BY ${c} ${orderDesc ? "DESC" : "ASC"}`;
+  }
+  return `SELECT * FROM ${t}${order} LIMIT ${limit} OFFSET ${offset}`;
+}
+
+/** 与设置面板 `localStorage.settings` 及后端 GetSettings 对齐；优先本地（保存后立即生效） */
+async function resolveQueryLimit(): Promise<number> {
+  try {
+    const raw = localStorage.getItem("settings");
+    if (raw) {
+      const parsed = JSON.parse(raw) as { queryLimit?: number };
+      if (typeof parsed.queryLimit === "number" && parsed.queryLimit >= 100) {
+        return parsed.queryLimit;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const s = await api.getSettings();
+  return Math.max(100, s.queryLimit || 5000);
 }
 
 const SQL_KEYWORDS = [
@@ -122,6 +183,8 @@ const gridTheme: Theme = {
 
 const GRID_ROW_HEIGHT = 32;
 const GRID_HEADER_HEIGHT = 34;
+/** 结果表 NULL 占位（与 slate-400 接近，区别于正文） */
+const GRID_NULL_TEXT = "#94a3b8";
 const ROW_MARKER_WIDTH = 46;
 
 const SQL_HISTORY_KEY = "tableflux.sql_history";
@@ -501,6 +564,99 @@ function StudioView({ groupId }: { groupId: string }) {
     const c = connections.find((x) => x.id === activeConnectionId);
     return c?.driver === "postgres" ? "postgres" : "mysql";
   }, [connections, activeConnectionId]);
+
+  const runTablePageQuery = useCallback(
+    async (
+      tabId: string,
+      dbName: string,
+      tableName: string,
+      opts: { offset: number; orderBy: string; orderDesc: boolean },
+    ) => {
+      if (!activeConnectionId) return;
+      const key = `${activeConnectionId}::${dbName || "__none__"}`;
+      try {
+        const limit = await resolveQueryLimit();
+        const page = await api.queryTablePage(
+          new TableQueryRequest({
+            connectionId: activeConnectionId,
+            database: dbName,
+            schema: "",
+            table: tableName,
+            offset: opts.offset,
+            limit,
+            orderBy: opts.orderBy,
+            orderDesc: opts.orderDesc,
+          }),
+        );
+        const result = queryResultPageToExecuteSQLResult(page);
+        const lastSql = buildTableBrowseSqlDisplay(
+          tableName,
+          sqlDialect,
+          opts.orderBy,
+          opts.orderDesc,
+          page.limit,
+          opts.offset,
+        );
+        setTabsByDatabase((prev) => {
+          const list = prev[key] ?? [];
+          return {
+            ...prev,
+            [key]: list.map((t) =>
+              t.id === tabId
+                ? {
+                    ...t,
+                    result,
+                    error: "",
+                    lastExecutedSql: lastSql,
+                    tableTotal: page.total,
+                    tableOffset: page.offset,
+                    tablePageLimit: page.limit,
+                    tableSortColumn: opts.orderBy || undefined,
+                    tableSortDesc: opts.orderDesc,
+                  }
+                : t,
+            ),
+          };
+        });
+      } catch (e) {
+        setTabsByDatabase((prev) => {
+          const list = prev[key] ?? [];
+          return {
+            ...prev,
+            [key]: list.map((t) =>
+              t.id === tabId ? { ...t, error: String(e), result: null } : t,
+            ),
+          };
+        });
+      }
+    },
+    [activeConnectionId, sqlDialect],
+  );
+
+  /** 会话恢复或切换回表标签页时 result 为空，自动拉取（新建表标签由本逻辑加载；对象树再次点击已存在表仍由 appendSelectSQL 显式刷新） */
+  useEffect(() => {
+    if (!activeConnectionId || !activeTab) return;
+    if (activeTab.type !== "table" || !activeTab.contextTable) return;
+    if (activeTab.connectionId && activeTab.connectionId !== activeConnectionId) return;
+    if (activeTab.result !== null || activeTab.error) return;
+
+    void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+      offset: activeTab.tableOffset ?? 0,
+      orderBy: activeTab.tableSortColumn ?? "",
+      orderDesc: activeTab.tableSortDesc ?? false,
+    });
+  }, [
+    activeConnectionId,
+    activeTab?.id,
+    activeTab?.type,
+    activeTab?.result,
+    activeTab?.error,
+    activeTab?.contextTable,
+    activeTab?.contextDb,
+    activeTab?.connectionId,
+    runTablePageQuery,
+  ]);
+
   const activeConnMeta = connections.find((c) => c.id === activeConnectionId);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
   const allDbNames = useMemo(() => dbTree.map((d) => d.name), [dbTree]);
@@ -886,9 +1042,13 @@ function StudioView({ groupId }: { groupId: string }) {
     const tableTabId = existed?.id ?? crypto.randomUUID();
     const tableSqlRef = quoteSqlIdentifier(tableName, sqlDialect);
     const selectSql = `SELECT * FROM ${tableSqlRef};`;
+    if (existed) {
+      setActiveForDatabase(dbName, tableTabId);
+      void runTablePageQuery(tableTabId, dbName, tableName, { offset: 0, orderBy: "", orderDesc: false });
+      return;
+    }
     setTabsByDatabase((prev) => {
       const current = prev[key] ?? [createSqlTab(1, activeConnectionId, dbName)];
-      if (existed) return prev;
       const tableTab: WorkbenchTab = {
         id: tableTabId,
         title: tableName,
@@ -904,33 +1064,6 @@ function StudioView({ groupId }: { groupId: string }) {
       return { ...prev, [key]: [...current, tableTab] };
     });
     setActiveForDatabase(dbName, tableTabId);
-    void (async () => {
-      try {
-        const r = await api.executeSQL({
-          connectionId: activeConnectionId,
-          database: dbName,
-          sql: selectSql,
-          mode: "single",
-          rowLimit: 50000,
-          timeoutMs: 30000,
-        });
-        setTabsByDatabase((prev) => {
-          const list = prev[key] ?? [];
-          return {
-            ...prev,
-            [key]: list.map((t) => (t.id === tableTabId ? { ...t, result: r, error: "", lastExecutedSql: selectSql } : t)),
-          };
-        });
-      } catch (e) {
-        setTabsByDatabase((prev) => {
-          const list = prev[key] ?? [];
-          return {
-            ...prev,
-            [key]: list.map((t) => (t.id === tableTabId ? { ...t, error: String(e), result: null, lastExecutedSql: selectSql } : t)),
-          };
-        });
-      }
-    })();
   };
 
   useEffect(() => {
@@ -1615,6 +1748,7 @@ function StudioView({ groupId }: { groupId: string }) {
                           <VirtualResultGrid
                             columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
                             rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                            displayTimezone={displayTimezone}
                             onCopyError={(msg) => setError(msg)}
                           />
                         </div>
@@ -1643,14 +1777,74 @@ function StudioView({ groupId }: { groupId: string }) {
                           {activeTabResult.execLog.join("\n")}
                         </pre>
                       </>
-                    ) : activeTabResult.rows && activeTabResult.rows.length > 0 ? (
-                      <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
-                        <VirtualResultGrid
-                          columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
-                          rows={activeTabResult.rows as Array<Record<string, unknown>>}
-                          onCopyError={(msg) => setError(msg)}
-                        />
-                      </div>
+                    ) : activeTabResult.columns && activeTabResult.columns.length > 0 ? (
+                      <>
+                        <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
+                          <VirtualResultGrid
+                            columns={activeTabResult.columns}
+                            rows={(activeTabResult.rows ?? []) as Array<Record<string, unknown>>}
+                            displayTimezone={displayTimezone}
+                            serverMode
+                            sortColumn={activeTab.tableSortColumn}
+                            sortDesc={activeTab.tableSortDesc}
+                            rowNumberStart={(activeTab.tableOffset ?? 0) + 1}
+                            onSortOrder={(colIndex, order) => {
+                              if (!activeTab.contextTable) return;
+                              const colName = activeTabResult.columns?.[colIndex];
+                              if (!colName) return;
+                              void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                offset: 0,
+                                orderBy: colName,
+                                orderDesc: order === "desc",
+                              });
+                            }}
+                            onCopyError={(msg) => setError(msg)}
+                          />
+                        </div>
+                        {activeTab.tableTotal != null &&
+                          activeTab.tablePageLimit != null &&
+                          activeTab.tableTotal > activeTab.tablePageLimit && (
+                            <div className="flex shrink-0 flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                              <button
+                                type="button"
+                                className="btn ghost"
+                                disabled={(activeTab.tableOffset ?? 0) <= 0}
+                                onClick={() => {
+                                  if (!activeTab.contextTable) return;
+                                  const lim = activeTab.tablePageLimit ?? 5000;
+                                  void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                    offset: Math.max(0, (activeTab.tableOffset ?? 0) - lim),
+                                    orderBy: activeTab.tableSortColumn ?? "",
+                                    orderDesc: activeTab.tableSortDesc ?? false,
+                                  });
+                                }}
+                              >
+                                上一页
+                              </button>
+                              <span>
+                                第 {Math.floor((activeTab.tableOffset ?? 0) / (activeTab.tablePageLimit || 1)) + 1} /{" "}
+                                {Math.max(1, Math.ceil(activeTab.tableTotal / (activeTab.tablePageLimit || 1)))} 页（每页{" "}
+                                {activeTab.tablePageLimit} 条，共 {activeTab.tableTotal} 行）
+                              </span>
+                              <button
+                                type="button"
+                                className="btn ghost"
+                                disabled={(activeTab.tableOffset ?? 0) + (activeTab.tablePageLimit ?? 0) >= activeTab.tableTotal}
+                                onClick={() => {
+                                  if (!activeTab.contextTable) return;
+                                  const lim = activeTab.tablePageLimit ?? 5000;
+                                  void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                    offset: (activeTab.tableOffset ?? 0) + lim,
+                                    orderBy: activeTab.tableSortColumn ?? "",
+                                    orderDesc: activeTab.tableSortDesc ?? false,
+                                  });
+                                }}
+                              >
+                                下一页
+                              </button>
+                            </div>
+                          )}
+                      </>
                     ) : (
                       <p className="text-xs text-slate-600">
                         {activeTabResult.message}（{activeTabResult.durationMs}ms）
@@ -1678,7 +1872,12 @@ function StudioView({ groupId }: { groupId: string }) {
                 <span className="font-mono text-slate-700">{activeTabResult?.durationMs != null ? `${activeTabResult.durationMs}ms` : "—"}</span>
               </span>
               <span>
-                行数：<span className="font-mono text-slate-700">{activeTabResult?.rows?.length ?? "—"}</span>
+                行数：
+                <span className="font-mono text-slate-700">
+                  {activeTab?.type === "table" && activeTab.tableTotal != null
+                    ? activeTab.tableTotal
+                    : (activeTabResult?.rows?.length ?? "—")}
+                </span>
               </span>
             </div>
           </footer>
@@ -1879,19 +2078,35 @@ function StudioView({ groupId }: { groupId: string }) {
   );
 }
 
+type HeaderBounds = { x: number; y: number; width: number; height: number };
+
 function VirtualResultGrid({
   columns,
   rows,
   onCopyError,
+  displayTimezone,
+  serverMode = false,
+  sortColumn,
+  sortDesc,
+  rowNumberStart = 1,
+  onSortOrder,
 }: {
   columns: string[];
   rows: Array<Record<string, unknown>>;
   onCopyError: (msg: string) => void;
+  displayTimezone: string;
+  serverMode?: boolean;
+  sortColumn?: string;
+  sortDesc?: boolean;
+  rowNumberStart?: number;
+  /** 表标签页：列头右侧下拉选择升序/降序 */
+  onSortOrder?: (colIndex: number, order: "asc" | "desc") => void;
 }) {
   const PAGE_SIZE = 10000;
   const [page, setPage] = useState(1);
   const [gridSize, setGridSize] = useState({ width: 900, height: 360 });
   const [ctxMenu, setCtxMenu] = useState<{ left: number; top: number } | null>(null);
+  const [sortMenu, setSortMenu] = useState<{ colIndex: number; bounds: HeaderBounds } | null>(null);
   const gridHostRef = useRef<HTMLDivElement | null>(null);
   const dataEditorRef = useRef<DataEditorRef | null>(null);
   const lastContextClientPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -1900,12 +2115,12 @@ function VirtualResultGrid({
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * PAGE_SIZE;
   const pageEnd = Math.min(pageStart + PAGE_SIZE, rows.length);
-  const pageRows = rows.slice(pageStart, pageEnd);
+  const pageRows = serverMode ? rows : rows.slice(pageStart, pageEnd);
   const rowCount = pageRows.length;
 
   useEffect(() => {
     setPage(1);
-  }, [rows, columns.join("|")]);
+  }, [rows, columns.join("|"), serverMode]);
 
   useEffect(() => {
     const el = gridHostRef.current;
@@ -1937,15 +2152,55 @@ function VirtualResultGrid({
     };
   }, [ctxMenu]);
 
+  useEffect(() => {
+    if (!sortMenu) return;
+    const close = () => setSortMenu(null);
+    const id = window.setTimeout(() => {
+      document.addEventListener("click", close);
+    }, 0);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener("click", close);
+    };
+  }, [sortMenu]);
+
   const gridColumns: GridColumn[] = useMemo(
-    () => columns.map((name) => ({ title: name, id: name, width: 180 })),
-    [columns],
+    () =>
+      columns.map((name) => {
+        const base: GridColumn = { title: name, id: name, width: 180 };
+        if (serverMode && onSortOrder) {
+          return {
+            ...base,
+            hasMenu: true,
+            menuIcon: GridColumnMenuIcon.Triangle,
+          };
+        }
+        return base;
+      }),
+    [columns, serverMode, onSortOrder],
   );
+
+  const markerStart = serverMode ? rowNumberStart : pageStart + 1;
 
   const getCellContent = useMemo(() => {
     return ([col, row]: Item): GridCell => {
       const colName = columns[col];
-      const value = colName ? String(pageRows[row]?.[colName] ?? "") : "";
+      const raw = colName ? pageRows[row]?.[colName] : undefined;
+      if (colName && (raw === null || raw === undefined)) {
+        return {
+          kind: GridCellKind.Text,
+          allowOverlay: false,
+          readonly: true,
+          displayData: "null",
+          data: "null",
+          themeOverride: {
+            textDark: GRID_NULL_TEXT,
+            textMedium: GRID_NULL_TEXT,
+            textLight: GRID_NULL_TEXT,
+          },
+        };
+      }
+      const value = colName ? formatCellForTimezone(raw, colName, displayTimezone) : "";
       return {
         kind: GridCellKind.Text,
         allowOverlay: false,
@@ -1954,7 +2209,7 @@ function VirtualResultGrid({
         data: value,
       };
     };
-  }, [columns, pageRows]);
+  }, [columns, pageRows, displayTimezone]);
 
   const copySelection = async () => {
     try {
@@ -1975,7 +2230,7 @@ function VirtualResultGrid({
       >
         <DataEditor
           ref={dataEditorRef}
-          key={`grid-${safePage}-${columns.join("|")}`}
+          key={`grid-${serverMode ? "srv" : "cli"}-${safePage}-${columns.join("|")}`}
           theme={gridTheme}
           columns={gridColumns}
           rows={rowCount}
@@ -1985,10 +2240,17 @@ function VirtualResultGrid({
           height={gridSize.height}
           rowHeight={GRID_ROW_HEIGHT}
           headerHeight={GRID_HEADER_HEIGHT}
-          rowMarkers={{ kind: "number", width: ROW_MARKER_WIDTH, startIndex: pageStart + 1 }}
+          rowMarkers={{ kind: "number", width: ROW_MARKER_WIDTH, startIndex: markerStart }}
           rowSelectionMode="multi"
           smoothScrollX
           smoothScrollY
+          onHeaderMenuClick={
+            serverMode && onSortOrder
+              ? (colIndex, bounds: HeaderBounds) => {
+                  setSortMenu({ colIndex, bounds });
+                }
+              : undefined
+          }
           onCellContextMenu={(_cell, event) => {
             event.preventDefault();
             const pos = lastContextClientPosRef.current;
@@ -2003,7 +2265,7 @@ function VirtualResultGrid({
           }}
         />
       </div>
-      {rows.length > PAGE_SIZE && (
+      {!serverMode && rows.length > PAGE_SIZE && (
         <div className="result-pager">
           <button className="btn ghost" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
             上一页
@@ -2029,6 +2291,42 @@ function VirtualResultGrid({
           </button>
         </div>
       ) : null}
+      {sortMenu && onSortOrder
+        ? createPortal(
+            <div
+              className="fixed z-[10000] min-w-[108px] rounded-md border border-slate-200 bg-white px-0.5 py-1 font-mono text-xs leading-snug text-slate-700 shadow-md"
+              style={{
+                left: sortMenu.bounds.x + sortMenu.bounds.width - 112,
+                top: sortMenu.bounds.y + sortMenu.bounds.height,
+              }}
+              role="menu"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={`w-full rounded px-2.5 py-1.5 text-left font-mono text-xs text-slate-700 hover:bg-slate-100 ${sortColumn === columns[sortMenu.colIndex] && !sortDesc ? "bg-slate-100" : ""}`}
+                onClick={() => {
+                  onSortOrder(sortMenu.colIndex, "asc");
+                  setSortMenu(null);
+                }}
+              >
+                升序
+              </button>
+              <button
+                type="button"
+                className={`w-full rounded px-2.5 py-1.5 text-left font-mono text-xs text-slate-700 hover:bg-slate-100 ${sortColumn === columns[sortMenu.colIndex] && sortDesc ? "bg-slate-100" : ""}`}
+                onClick={() => {
+                  onSortOrder(sortMenu.colIndex, "desc");
+                  setSortMenu(null);
+                }}
+              >
+                降序
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

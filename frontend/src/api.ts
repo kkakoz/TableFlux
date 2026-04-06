@@ -2,6 +2,7 @@ import {
   AIService,
   DatabaseService,
   SecretService,
+  SettingsService,
   StudioWindowService,
   TaskService,
   WorkspaceService,
@@ -10,8 +11,10 @@ import {
   type ConnectionMeta,
   type ExecuteSQLRequest,
   GroupCreateRequest,
+  type QueryResultPage,
   SaveStudioSessionRequest,
   type StudioSessionSnapshot,
+  TableQueryRequest,
   TableSchemaRequest,
   type VaultStatus,
   type WorkspaceGroup,
@@ -44,6 +47,9 @@ export const api = {
   openGroupWindow: (groupId: string) => StudioWindowService.OpenGroupWindow(groupId),
 
   executeSQL: (req: ExecuteSQLRequest | Record<string, unknown>) => DatabaseService.ExecuteSQL(req as any),
+  queryTablePage: (req: TableQueryRequest | Record<string, unknown>) =>
+    DatabaseService.QueryTablePage(req instanceof TableQueryRequest ? req : new TableQueryRequest(req)) as Promise<QueryResultPage>,
+  getSettings: () => SettingsService.GetSettings(),
   listDatabases: (connectionId: string) => DatabaseService.ListDatabases(connectionId),
   listTables: (connectionId: string, database: string, schema = "") =>
     DatabaseService.ListTables(connectionId, database, schema),
