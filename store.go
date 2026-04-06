@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"encoding/json"
@@ -50,7 +50,7 @@ func NewDataStore(appName string) (*DataStore, error) {
 		now := time.Now()
 		ds.state.Groups = append(ds.state.Groups, WorkspaceGroup{
 			ID:        uuid.NewString(),
-			Name:      "Default Group",
+			Name:      "默认",
 			Color:     "#0f766e",
 			Icon:      "database",
 			Order:     0,

@@ -11,6 +11,7 @@ import {
   type ConnectionMeta,
   type ExecuteSQLRequest,
   GroupCreateRequest,
+  GroupUpdateRequest,
   type QueryResultPage,
   SaveStudioSessionRequest,
   type StudioSessionSnapshot,
@@ -33,6 +34,8 @@ export const api = {
   createGroup: (name: string, color: string) =>
     WorkspaceService.CreateGroup(new GroupCreateRequest({ name, color, icon: "database" })),
   deleteGroup: (groupId: string) => WorkspaceService.DeleteGroup(groupId),
+  updateGroup: (groupId: string, payload: { name: string; color: string; icon: string }) =>
+    WorkspaceService.UpdateGroup(groupId, new GroupUpdateRequest(payload)),
   markGroupOpened: (groupId: string) => WorkspaceService.MarkGroupOpened(groupId),
 
   listGroupConnections: (groupId: string) =>

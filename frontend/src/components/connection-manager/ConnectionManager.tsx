@@ -4,6 +4,7 @@ import type { ConnectionMeta, WorkspaceGroup } from "../../types";
 import SettingsPanel from "../SettingsPanel";
 import ConnectionModal from "./ConnectionModal";
 import ConnectionListPanel from "./ConnectionListPanel";
+import GroupEditModal from "./GroupEditModal";
 import HeaderBar from "./HeaderBar";
 import WorkspaceSidebar from "./WorkspaceSidebar";
 
@@ -26,6 +27,8 @@ export default function ConnectionManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [editingConnection, setEditingConnection] = useState<ConnectionMeta | null>(null);
+  const [groupEditOpen, setGroupEditOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<WorkspaceGroup | null>(null);
 
   const refreshGroupCounts = useCallback(async (groupList?: WorkspaceGroup[]) => {
     const list = groupList ?? (await api.listGroups());
@@ -47,9 +50,10 @@ export default function ConnectionManager() {
     const list = await api.listGroups();
     const sorted = list.sort((a, b) => a.order - b.order);
     setGroups(sorted);
-    if (!selectedGroupId && sorted.length > 0) {
-      setSelectedGroupId(sorted[0].id);
-    }
+    setSelectedGroupId((prev) => {
+      if (prev && sorted.some((g) => g.id === prev)) return prev;
+      return sorted[0]?.id ?? "";
+    });
     await refreshGroupCounts(sorted);
   };
 
@@ -130,6 +134,24 @@ export default function ConnectionManager() {
     }
   };
 
+  const handleEditGroup = (g: WorkspaceGroup) => {
+    setEditingGroup(g);
+    setGroupEditOpen(true);
+  };
+
+  const handleDeleteGroup = async (g: WorkspaceGroup) => {
+    const n = groupConnCounts[g.id] ?? 0;
+    const hint = n > 0 ? `（含 ${n} 个连接，将一并删除）` : "";
+    if (!window.confirm(`确定删除分组「${g.name}」？${hint}`)) return;
+    try {
+      await api.deleteGroup(g.id);
+      setMessage("");
+      await loadGroups();
+    } catch (e) {
+      setMessage(String(e));
+    }
+  };
+
   return (
     <div className="light flex h-screen min-h-0 w-full flex-col overflow-hidden bg-[#f4f6f9]">
       <div className="flex min-h-0 flex-1 flex-col px-3 py-2 sm:px-4 sm:py-3">
@@ -146,6 +168,8 @@ export default function ConnectionManager() {
             onSelectGroup={setSelectedGroupId}
             onOpenWorkbench={() => selectedGroupId && api.openGroupWindow(selectedGroupId)}
             canOpenWorkbench={Boolean(selectedGroupId)}
+            onEditGroup={handleEditGroup}
+            onDeleteGroup={handleDeleteGroup}
           />
 
           <ConnectionListPanel
@@ -189,6 +213,17 @@ export default function ConnectionManager() {
       ) : null}
 
       {settingsOpen ? <SettingsPanel onClose={() => setSettingsOpen(false)} /> : null}
+
+      <GroupEditModal
+        open={groupEditOpen}
+        group={editingGroup}
+        onClose={() => {
+          setGroupEditOpen(false);
+          setEditingGroup(null);
+        }}
+        onSaved={loadGroups}
+        onError={setMessage}
+      />
     </div>
   );
 }
