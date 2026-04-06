@@ -986,9 +986,22 @@ function StudioView({ groupId }: { groupId: string }) {
 
   const explain = async () => {
     if (!activeConnectionId || !activeTab) return;
+    let sqlText = activeTab.sql;
+    const ed = monacoEditorRef.current;
+    if (ed) {
+      const model = ed.getModel();
+      const sel = ed.getSelection();
+      if (model && sel && !sel.isEmpty()) {
+        sqlText = model.getValueInRange(sel);
+      } else if (model) {
+        sqlText = model.getValue();
+      }
+    }
+    const trimmed = sqlText.trim();
+    if (!trimmed) return;
     try {
-      const explainSql = `EXPLAIN ${activeTab.sql.trim()}`;
-      const r = await api.explainSQL({ connectionId: activeConnectionId, database: selectedDatabase, sql: activeTab.sql });
+      const explainSql = `EXPLAIN ${trimmed}`;
+      const r = await api.explainSQL({ connectionId: activeConnectionId, database: selectedDatabase, sql: trimmed });
       upsertDatabaseTabs(selectedDatabase, (list) =>
         list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "", lastExecutedSql: explainSql } : t))
       );
@@ -1236,36 +1249,18 @@ function StudioView({ groupId }: { groupId: string }) {
           className="flex min-h-0 w-[var(--sw)] shrink-0 flex-col border-r border-slate-200 bg-white"
           style={{ ["--sw" as string]: `${sidebarWidth}px`, width: sidebarWidth }}
         >
-          <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
-            <div className="min-w-0">
-              <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                <span className="rounded-tf bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600" title={currentGroupName}>
-                  {currentGroupName}
-                </span>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
+            <div className="relative shrink-0">
               <button
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-600 hover:bg-slate-100"
                 type="button"
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                title="管理左侧展示的数据库"
-                onClick={() => setDbVisibilityOpen(true)}
-                disabled={!activeConnectionId}
+                onClick={() => setMenuOpen((v) => !v)}
+                title="菜单"
               >
-                <Database className="h-3.5 w-3.5 text-blue-600" strokeWidth={2} />
-                管理展示库
+                <Menu className="h-4 w-4" strokeWidth={2} />
               </button>
-              <div className="relative">
-                <button
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-600 hover:bg-slate-100"
-                  type="button"
-                  onClick={() => setMenuOpen((v) => !v)}
-                  title="菜单"
-                >
-                  <Menu className="h-4 w-4" strokeWidth={2} />
-                </button>
-                {menuOpen && (
-                  <div className="absolute right-0 z-40 mt-1 w-44 overflow-hidden rounded-tf border border-slate-200 bg-white py-1 text-xs shadow-lg">
+              {menuOpen && (
+                <div className="absolute left-0 z-40 mt-1 w-44 overflow-hidden rounded-tf border border-slate-200 bg-white py-1 text-xs shadow-lg">
                     <button
                       type="button"
                       className="block w-full px-3 py-2 text-left hover:bg-slate-50"
@@ -1288,8 +1283,17 @@ function StudioView({ groupId }: { groupId: string }) {
                     </button>
                   </div>
                 )}
-              </div>
             </div>
+            <button
+              type="button"
+              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              title="管理左侧展示的数据库"
+              onClick={() => setDbVisibilityOpen(true)}
+              disabled={!activeConnectionId}
+            >
+              <Database className="h-3.5 w-3.5 text-blue-600" strokeWidth={2} />
+              管理展示库
+            </button>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto px-1 py-2">
@@ -1350,7 +1354,13 @@ function StudioView({ groupId }: { groupId: string }) {
           <section className="flex min-h-0 flex-1 flex-col border-l border-slate-200 bg-white shadow-sm">
             <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
               <span
-                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ${
+                className="min-w-0 max-w-[min(240px,40vw)] shrink truncate text-base font-semibold text-slate-800"
+                title={currentGroupName}
+              >
+                {currentGroupName}
+              </span>
+              <span
+                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] ${
                   activeConnectionId ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100" : "bg-slate-100 text-slate-500"
                 }`}
                 title={activeConnMeta ? `${activeConnMeta.name} · ${activeConnMeta.host}:${activeConnMeta.port}` : undefined}
@@ -1358,7 +1368,7 @@ function StudioView({ groupId }: { groupId: string }) {
                 {activeConnectionId ? (activeConnMeta ? `${activeConnMeta.driver.toUpperCase()} · 就绪` : "已连接") : "未连接"}
               </span>
               <select
-                className="max-w-[220px] rounded-tf border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800"
+                className="max-w-[140px] rounded-tf border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] leading-tight text-slate-700"
                 value={activeConnectionId}
                 onChange={(e) => setActiveConnectionId(e.target.value)}
                 aria-label="数据库连接"
@@ -1400,6 +1410,7 @@ function StudioView({ groupId }: { groupId: string }) {
                   type="button"
                   className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50"
                   onClick={() => void explain()}
+                  title="EXPLAIN 选中或全文（与工具栏执行一致）"
                 >
                   计划
                 </button>
