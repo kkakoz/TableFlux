@@ -1529,33 +1529,30 @@ function StudioView({ groupId }: { groupId: string }) {
                   title="拖拽调整编辑器/结果高度"
                 />
                 <section className="flex min-h-[200px] flex-1 flex-col gap-2 overflow-hidden border-t border-slate-200 bg-slate-50/40 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">执行结果</h2>
-                    <p className="text-[11px] text-slate-500">
-                      时区展示：<span className="font-mono text-slate-700">{displayTimezone}</span>
-                    </p>
-                  </div>
                   {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
                   {activeTabResult && (
                     <>
-                      <p className="text-xs text-slate-600">
-                        {activeTabResult.message}（{activeTabResult.durationMs}ms）
-                      </p>
                       {activeTabResult.execLog && activeTabResult.execLog.length > 0 ? (
-                        <pre className="max-h-[min(320px,50vh)] min-h-0 flex-1 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
-                          {activeTabResult.execLog.join("\n")}
-                        </pre>
+                        <>
+                          <p className="shrink-0 text-xs text-slate-600">
+                            {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                          </p>
+                          <pre className="max-h-[min(320px,50vh)] min-h-0 flex-1 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
+                            {activeTabResult.execLog.join("\n")}
+                          </pre>
+                        </>
+                      ) : activeTabResult.rows && activeTabResult.rows.length > 0 ? (
+                        <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
+                          <VirtualResultGrid
+                            columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                            rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                            onCopyError={(msg) => setError(msg)}
+                          />
+                        </div>
                       ) : (
-                        activeTabResult.rows &&
-                        activeTabResult.rows.length > 0 && (
-                          <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
-                            <VirtualResultGrid
-                              columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
-                              rows={activeTabResult.rows as Array<Record<string, unknown>>}
-                              onCopyError={(msg) => setError(msg)}
-                            />
-                          </div>
-                        )
+                        <p className="text-xs text-slate-600">
+                          {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                        </p>
                       )}
                     </>
                   )}
@@ -1565,24 +1562,19 @@ function StudioView({ groupId }: { groupId: string }) {
 
             {activeTab?.type === "table" && (
               <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">表数据</h2>
-                  <p className="text-[11px] text-slate-500">
-                    时区展示：<span className="font-mono text-slate-700">{displayTimezone}</span>
-                  </p>
-                </div>
                 {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
                 {activeTabResult && (
                   <>
-                    <p className="text-xs text-slate-600">
-                      {activeTabResult.message}（{activeTabResult.durationMs}ms）
-                    </p>
-                    {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
-                      <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
-                        {activeTabResult.execLog.join("\n")}
-                      </pre>
-                    )}
-                    {activeTabResult.rows && activeTabResult.rows.length > 0 && (
+                    {activeTabResult.execLog && activeTabResult.execLog.length > 0 ? (
+                      <>
+                        <p className="shrink-0 text-xs text-slate-600">
+                          {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                        </p>
+                        <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
+                          {activeTabResult.execLog.join("\n")}
+                        </pre>
+                      </>
+                    ) : activeTabResult.rows && activeTabResult.rows.length > 0 ? (
                       <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
                         <VirtualResultGrid
                           columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
@@ -1590,6 +1582,10 @@ function StudioView({ groupId }: { groupId: string }) {
                           onCopyError={(msg) => setError(msg)}
                         />
                       </div>
+                    ) : (
+                      <p className="text-xs text-slate-600">
+                        {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                      </p>
                     )}
                   </>
                 )}
