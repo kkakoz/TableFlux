@@ -49,10 +49,10 @@ func main() {
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
 		Title:            "TableFlux",
-		Width:            1280,
-		Height:           860,
-		MinWidth:         1024,
-		MinHeight:        680,
+		Width:            920,
+		Height:           620,
+		MinWidth:         720,
+		MinHeight:        480,
 		BackgroundColour: application.NewRGB(11, 17, 26),
 		URL:              "/",
 		Mac: application.MacWindow{

@@ -131,8 +131,8 @@ export default function ConnectionManager() {
   };
 
   return (
-    <div className="app-shell light min-h-screen bg-[#f4f6f9]">
-      <div className="mx-auto flex min-h-screen max-w-[920px] flex-col px-3 py-2 sm:px-4 sm:py-3">
+    <div className="light flex h-screen min-h-0 w-full flex-col overflow-hidden bg-[#f4f6f9]">
+      <div className="flex min-h-0 flex-1 flex-col px-3 py-2 sm:px-4 sm:py-3">
         <HeaderBar workspaceName={workspaceTitle} onOpenSettings={() => setSettingsOpen(true)} />
 
         <div className="mt-2 flex min-h-0 flex-1 gap-3 rounded-[10px] border border-slate-200 bg-white p-3 shadow-sm shadow-slate-900/5">

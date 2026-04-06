@@ -68,7 +68,7 @@ export default function ConnectionListPanel({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/40 p-2">
+      <div className="tf-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/40 p-2">
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-1 py-10 text-center text-[12px] text-slate-500">
             <p>{connections.length === 0 ? "该分组下暂无连接" : "无匹配连接"}</p>

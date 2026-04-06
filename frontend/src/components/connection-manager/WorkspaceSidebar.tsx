@@ -25,7 +25,7 @@ export default function WorkspaceSidebar({
   canOpenWorkbench,
 }: Props) {
   return (
-    <aside className="flex w-[220px] shrink-0 flex-col gap-2 border-r border-slate-200 bg-slate-50/50 pr-3">
+    <aside className="flex h-full min-h-0 w-[220px] shrink-0 flex-col gap-2 self-stretch border-r border-slate-200 bg-slate-50/50 pr-3">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">工作区</div>
       <form className="flex gap-1.5" onSubmit={onCreateGroup}>
         <input
@@ -42,7 +42,7 @@ export default function WorkspaceSidebar({
         </button>
       </form>
 
-      <nav className="flex min-h-[140px] max-h-[min(360px,42vh)] flex-col gap-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+      <nav className="tf-scrollbar flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
         {groups.map((g) => {
           const active = selectedGroupId === g.id;
           const count = groupConnCounts[g.id] ?? 0;
@@ -73,7 +73,7 @@ export default function WorkspaceSidebar({
 
       <button
         type="button"
-        className="mt-auto w-full rounded-lg bg-blue-600 px-3 py-2 text-[12px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+        className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-[12px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={!canOpenWorkbench}
         onClick={onOpenWorkbench}
       >

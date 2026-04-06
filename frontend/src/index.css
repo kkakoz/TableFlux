@@ -4,6 +4,51 @@
   --radius-tf: 7px;
 }
 
+/* 根节点占满视口，避免连接管理页出现整页纵向滚动条（滚动在分区列表内） */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* 全局窄滚动条（列表、侧栏、弹窗等） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.42);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
+}
+
+/* 需要更明显「细条」的区域可叠加此类（与全局一致，便于单独加深） */
+.tf-scrollbar {
+  scrollbar-color: rgba(148, 163, 184, 0.65) transparent;
+}
+
+.tf-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+.tf-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.72);
+}
+
 /* Studio 工作台：避免全局主题 CSS 影响 Monaco 容器高度 */
 .tf-studio-root .monaco-editor,
 .tf-studio-root .monaco-editor-background {

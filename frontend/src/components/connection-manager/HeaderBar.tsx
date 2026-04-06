@@ -7,7 +7,7 @@ type Props = {
 
 export default function HeaderBar({ workspaceName, onOpenSettings }: Props) {
   return (
-    <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/90 pb-2.5">
+    <header className="flex min-h-0 shrink-0 items-center justify-between gap-3 border-b border-slate-200/90 pb-2.5">
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-2">
           <h1 className="text-[15px] font-semibold tracking-tight text-slate-900">TableFlux</h1>

@@ -220,7 +220,7 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="tf-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <ConnectionForm
             values={values}
             onChange={setValues}
