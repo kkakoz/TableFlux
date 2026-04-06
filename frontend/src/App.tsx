@@ -11,7 +11,7 @@ import {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { editor as MonacoEditorNS, IDisposable, languages } from "monaco-editor";
-import { Database, History, Menu, RefreshCw, Settings2 } from "lucide-react";
+import { Database, History, Menu, Play, RefreshCw, Settings2 } from "lucide-react";
 import { api } from "./api";
 import type {
   ConnectionMeta,
@@ -22,7 +22,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal";
 import { readDisplayTimezone } from "./components/studio/timezoneDisplay";
 import SqlEditorWithGutter from "./components/studio/SqlEditorWithGutter";
-import { findStatementAtLine, parseSqlStatements } from "./utils/sqlStatements";
+import { findStatementAtLine, parseSqlStatements, splitStatementsBySemicolon } from "./utils/sqlStatements";
 
 type ViewMode = "main" | "studio";
 type DbTreeNode = {
@@ -463,7 +463,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
   const completionDisposableRef = useRef<IDisposable | null>(null);
   const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
-  const runSQLRef = useRef<(mode: "single" | "batch") => void>(() => {});
+  const runSQLSingleAtCursorRef = useRef<() => void>(() => {});
   const addTabRef = useRef<() => void>(() => {});
   const openAiAssistRef = useRef<() => void>(() => {});
   const aiAssistInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -939,7 +939,8 @@ function StudioView({ groupId }: { groupId: string }) {
     }
   };
 
-  const runSQL = async (mode: "single" | "batch") => {
+  /** 工具栏执行：选中优先，否则全文；多语句（按分号）走批量，仅展示执行摘要；单条则展示结果表。 */
+  const runUnifiedSQL = async () => {
     if (!activeConnectionId || !activeTab) return;
     let sqlText = activeTab.sql;
     const ed = monacoEditorRef.current;
@@ -948,7 +949,26 @@ function StudioView({ groupId }: { groupId: string }) {
       const sel = ed.getSelection();
       if (model && sel && !sel.isEmpty()) {
         sqlText = model.getValueInRange(sel);
-      } else if (model && mode === "single") {
+      } else if (model) {
+        sqlText = model.getValue();
+      }
+    }
+    const parts = splitStatementsBySemicolon(sqlText);
+    const mode = parts.length > 1 ? "batch" : "single";
+    await executeSqlForActiveTab(sqlText, mode);
+  };
+
+  /** Ctrl+R：执行选中或光标所在单条语句（始终 single，可展示结果表）。 */
+  const runSQLSingleAtCursor = async () => {
+    if (!activeConnectionId || !activeTab) return;
+    let sqlText = activeTab.sql;
+    const ed = monacoEditorRef.current;
+    if (ed) {
+      const model = ed.getModel();
+      const sel = ed.getSelection();
+      if (model && sel && !sel.isEmpty()) {
+        sqlText = model.getValueInRange(sel);
+      } else if (model) {
         const pos = ed.getPosition();
         if (pos) {
           const stmts = parseSqlStatements(model.getValue());
@@ -957,7 +977,7 @@ function StudioView({ groupId }: { groupId: string }) {
         }
       }
     }
-    await executeSqlForActiveTab(sqlText, mode);
+    await executeSqlForActiveTab(sqlText, "single");
   };
 
   const addTab = () => {
@@ -1046,9 +1066,9 @@ function StudioView({ groupId }: { groupId: string }) {
   };
 
   useEffect(() => {
-    runSQLRef.current = runSQL;
+    runSQLSingleAtCursorRef.current = runSQLSingleAtCursor;
     addTabRef.current = addTab;
-  }, [runSQL, addTab]);
+  }, [runSQLSingleAtCursor, addTab]);
 
   const explain = async () => {
     if (!activeConnectionId || !activeTab) return;
@@ -1178,7 +1198,7 @@ function StudioView({ groupId }: { groupId: string }) {
 
   const onEditorMount = (editor: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
     monacoEditorRef.current = editor;
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyR, () => runSQLRef.current("single"));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyR, () => runSQLSingleAtCursorRef.current());
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyQ, () => addTabRef.current());
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL, () => openAiAssistRef.current());
     if (!completionDisposableRef.current) {
@@ -1412,24 +1432,15 @@ function StudioView({ groupId }: { groupId: string }) {
                 <RefreshCw className="h-4 w-4" strokeWidth={2} />
               </button>
               <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                <span className="hidden text-[11px] text-slate-400 lg:inline">Ctrl+R 执行 · Ctrl+L AI</span>
+                <span className="hidden text-[11px] text-slate-400 lg:inline">Ctrl+L AI · Ctrl+R 执行当前语句</span>
                 <button
                   type="button"
-                  className="inline-flex h-8 items-center rounded-md border border-blue-200 bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-500"
-                  onClick={() => void runSQL("single")}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-transparent text-emerald-600 hover:bg-transparent hover:text-emerald-600 disabled:cursor-not-allowed disabled:text-slate-300"
+                  onClick={() => void runUnifiedSQL()}
                   disabled={!activeConnectionId || activeTab?.type !== "sql"}
-                  title="执行选中 / 光标所在语句 (Ctrl+R)"
+                  title="执行选中或全文；多条语句时仅显示执行摘要 (与批量一致)"
                 >
-                  执行
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                  onClick={() => void runSQL("batch")}
-                  disabled={!activeConnectionId || activeTab?.type !== "sql"}
-                  title="批量执行当前编辑器全文"
-                >
-                  批量
+                  <Play className="h-4 w-4" fill="currentColor" strokeWidth={0} />
                 </button>
                 <button
                   type="button"
@@ -1530,19 +1541,21 @@ function StudioView({ groupId }: { groupId: string }) {
                       <p className="text-xs text-slate-600">
                         {activeTabResult.message}（{activeTabResult.durationMs}ms）
                       </p>
-                      {activeTabResult.execLog && activeTabResult.execLog.length > 0 && (
-                        <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
+                      {activeTabResult.execLog && activeTabResult.execLog.length > 0 ? (
+                        <pre className="max-h-[min(320px,50vh)] min-h-0 flex-1 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
                           {activeTabResult.execLog.join("\n")}
                         </pre>
-                      )}
-                      {activeTabResult.rows && activeTabResult.rows.length > 0 && (
-                        <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
-                          <VirtualResultGrid
-                            columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
-                            rows={activeTabResult.rows as Array<Record<string, unknown>>}
-                            onCopyError={(msg) => setError(msg)}
-                          />
-                        </div>
+                      ) : (
+                        activeTabResult.rows &&
+                        activeTabResult.rows.length > 0 && (
+                          <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
+                            <VirtualResultGrid
+                              columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                              rows={activeTabResult.rows as Array<Record<string, unknown>>}
+                              onCopyError={(msg) => setError(msg)}
+                            />
+                          </div>
+                        )
                       )}
                     </>
                   )}

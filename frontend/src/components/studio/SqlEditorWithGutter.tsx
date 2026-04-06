@@ -91,28 +91,29 @@ export default function SqlEditorWithGutter({
                 className="group/line flex items-stretch border-b border-transparent text-[11px] leading-none text-slate-400 hover:bg-slate-300/25"
                 style={{ height: lineHeight, minHeight: lineHeight }}
               >
-                <div className="flex w-[22px] shrink-0 items-center justify-center border-r border-slate-200/60 bg-[#eceef1] group-hover/line:bg-[#e4e6ea]">
-                  {stmt ? (
-                    <button
-                      type="button"
-                      disabled={executeDisabled}
-                      title="执行该语句"
-                      className="flex h-5 w-5 items-center justify-center rounded text-slate-500 opacity-35 transition-all hover:bg-slate-400/35 hover:text-blue-700 hover:opacity-100 group-hover/line:opacity-70 disabled:cursor-not-allowed disabled:opacity-20"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (!stmt || executeDisabled) return;
-                        void onExecuteStatement(stmt.sql);
-                      }}
-                    >
-                      <Play className="h-3 w-3" fill="currentColor" strokeWidth={0} />
-                    </button>
-                  ) : (
-                    <span className="h-3 w-3" />
-                  )}
-                </div>
+
                 <div className="flex min-w-0 flex-1 select-none items-center justify-end pr-1.5 tabular-nums text-slate-400">
                   {lineNo}
+                </div>
+                <div className="flex w-[22px] shrink-0 items-center justify-center border-r border-slate-200/60 bg-[#eceef1] group-hover/line:bg-[#e4e6ea]">
+                    {stmt ? (
+                        <button
+                            type="button"
+                            disabled={executeDisabled}
+                            title="执行该语句"
+                            className="flex h-5 w-5 items-center justify-center rounded bg-transparent text-emerald-600 hover:bg-transparent hover:text-emerald-600 disabled:cursor-not-allowed disabled:text-slate-400 disabled:opacity-40"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (!stmt || executeDisabled) return;
+                                void onExecuteStatement(stmt.sql);
+                            }}
+                        >
+                            <Play className="h-3 w-3" fill="currentColor" strokeWidth={0} />
+                        </button>
+                    ) : (
+                        <span className="h-3 w-3" />
+                    )}
                 </div>
               </div>
             );

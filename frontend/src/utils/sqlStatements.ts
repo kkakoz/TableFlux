@@ -111,6 +111,14 @@ export function parseSqlStatements(text: string): ParsedSqlStatement[] {
   return out;
 }
 
+/** 与后端 `splitStatements` 一致：按分号拆分并去掉空段（用于判断单条 / 批量）。 */
+export function splitStatementsBySemicolon(sqlText: string): string[] {
+  return sqlText
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 /** 光标所在行（1-based）属于哪条已解析语句；无则 null */
 export function findStatementAtLine(statements: ParsedSqlStatement[], lineOneBased: number): ParsedSqlStatement | null {
   for (const s of statements) {
