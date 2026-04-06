@@ -106,6 +106,10 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 			return SQLExecutionResult{}, err
 		}
 		displayCols := disambiguateQueryColumns(cols)
+		colTypes, _ := columnDatabaseTypeNames(rows)
+		if len(colTypes) != len(displayCols) {
+			colTypes = nil
+		}
 		resultRows := make([]map[string]any, 0)
 		truncated := false
 		for rows.Next() {
@@ -135,11 +139,12 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 			message = fmt.Sprintf("Query finished (%d rows, truncated by row limit)", len(resultRows))
 		}
 		return SQLExecutionResult{
-			Columns:    displayCols,
-			Rows:       resultRows,
-			Message:    message,
-			Truncated:  truncated,
-			DurationMs: time.Since(started).Milliseconds(),
+			Columns:     displayCols,
+			ColumnTypes: colTypes,
+			Rows:        resultRows,
+			Message:     message,
+			Truncated:   truncated,
+			DurationMs:  time.Since(started).Milliseconds(),
 		}, nil
 	}
 
@@ -415,6 +420,10 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 		return QueryResultPage{}, err
 	}
 	displayCols = disambiguateQueryColumns(cols)
+	colTypes, _ := columnDatabaseTypeNames(rows)
+	if len(colTypes) != len(displayCols) {
+		colTypes = nil
+	}
 	resultRows := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(cols))
@@ -443,12 +452,13 @@ func (s *DatabaseService) QueryTablePage(req TableQueryRequest) (QueryResultPage
 		}
 	}
 	return QueryResultPage{
-		Columns:    displayCols,
-		Rows:       resultRows,
-		Total:      total,
-		Offset:     req.Offset,
-		Limit:      req.Limit,
-		DurationMs: time.Since(started).Milliseconds(),
+		Columns:     displayCols,
+		ColumnTypes: colTypes,
+		Rows:        resultRows,
+		Total:       total,
+		Offset:      req.Offset,
+		Limit:       req.Limit,
+		DurationMs:  time.Since(started).Milliseconds(),
 	}, nil
 }
 
@@ -846,6 +856,18 @@ func sqlDriverName(driver string) string {
 		return "pgx"
 	}
 	return "mysql"
+}
+
+func columnDatabaseTypeNames(rows *sql.Rows) ([]string, error) {
+	types, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(types))
+	for i, ct := range types {
+		out[i] = strings.ToLower(strings.TrimSpace(ct.DatabaseTypeName()))
+	}
+	return out, nil
 }
 
 func splitStatements(sqlText string) []string {

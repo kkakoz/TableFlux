@@ -32,6 +32,7 @@ import {
   mergeDotCompletionItems,
   resolveTableSchemaRequest,
 } from "./utils/sqlDotCompletion";
+import { isExpandableLongTextColumnType } from "./utils/gridColumnTypes";
 
 type ViewMode = "main" | "studio";
 type DbTreeNode = {
@@ -86,11 +87,13 @@ function quoteSqlIdentifier(name: string, dialect: "mysql" | "postgres"): string
 
 function queryResultPageToExecuteSQLResult(page: {
   columns: string[];
+  columnTypes?: string[];
   rows: Array<Record<string, unknown>>;
   durationMs: number;
 }): ExecuteSQLResult {
   return {
     columns: page.columns,
+    columnTypes: page.columnTypes,
     rows: page.rows,
     rowsAffected: 0,
     lastInsertId: 0,
@@ -249,6 +252,7 @@ function MainView() {
   });
   const [message, setMessage] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
 
   const loadGroups = async () => {
     const list = await api.listGroups();
@@ -264,7 +268,7 @@ function MainView() {
       return;
     }
     const list = await api.listGroupConnections(groupId);
-    list.sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name));
+    list.sort((a, b) => a.name.localeCompare(b.name));
     setConnections(list);
   };
 
@@ -276,6 +280,19 @@ function MainView() {
 
   useEffect(() => {
     loadConnections(selectedGroupId).catch((e) => setMessage(String(e)));
+  }, [selectedGroupId]);
+
+  useEffect(() => {
+    setEditingConnectionId(null);
+    setConnForm({
+      name: "",
+      driver: "mysql",
+      host: "127.0.0.1",
+      port: 3306,
+      user: "root",
+      password: "",
+      defaultDb: "",
+    });
   }, [selectedGroupId]);
 
   const createGroup = async (e: FormEvent) => {
@@ -290,11 +307,11 @@ function MainView() {
     }
   };
 
-  const createConnection = async (e: FormEvent) => {
+  const saveConnection = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedGroupId) return;
     try {
-      await api.createConnection({
+      const base = {
         groupId: selectedGroupId,
         name: connForm.name,
         driver: connForm.driver,
@@ -305,15 +322,53 @@ function MainView() {
         defaultDb: connForm.defaultDb,
         sslMode: "disable",
         sshTunnel: false,
-        tags: [],
+        tags: [] as string[],
         readOnlyFlag: false,
-        favorite: false,
-      });
+      };
+      if (editingConnectionId) {
+        const prev = connections.find((c) => c.id === editingConnectionId);
+        await api.updateConnection(editingConnectionId, {
+          ...base,
+          favorite: prev?.favorite ?? false,
+        });
+        setEditingConnectionId(null);
+      } else {
+        await api.createConnection({
+          ...base,
+          favorite: false,
+        });
+      }
       setConnForm((prev) => ({ ...prev, name: "", password: "", defaultDb: "" }));
       await loadConnections(selectedGroupId);
     } catch (err) {
       setMessage(String(err));
     }
+  };
+
+  const startEditConnection = (c: ConnectionMeta) => {
+    setEditingConnectionId(c.id);
+    setConnForm({
+      name: c.name,
+      driver: c.driver,
+      host: c.host,
+      port: c.port,
+      user: c.user,
+      password: "",
+      defaultDb: c.defaultDb,
+    });
+  };
+
+  const cancelEditConnection = () => {
+    setEditingConnectionId(null);
+    setConnForm({
+      name: "",
+      driver: "mysql",
+      host: "127.0.0.1",
+      port: 3306,
+      user: "root",
+      password: "",
+      defaultDb: "",
+    });
   };
 
   return (
@@ -371,7 +426,7 @@ function MainView() {
               <h2 className="workspace-section-title">连接</h2>
               <span className="workspace-section-meta">{selectedGroupId ? `${connections.length} 个` : "未选分组"}</span>
             </div>
-            <form onSubmit={createConnection} className="stack stack-workbench">
+            <form onSubmit={saveConnection} className="stack stack-workbench">
               <input
                 className="workspace-input"
                 value={connForm.name}
@@ -415,7 +470,7 @@ function MainView() {
                   type="password"
                   value={connForm.password}
                   onChange={(e) => setConnForm({ ...connForm, password: e.target.value })}
-                  placeholder="密码"
+                  placeholder={editingConnectionId ? "留空则不修改密码" : "密码"}
                 />
                 <input
                   className="workspace-input"
@@ -424,9 +479,16 @@ function MainView() {
                   placeholder="默认库"
                 />
               </div>
-              <button className="btn btn-workbench-sm" type="submit">
-                保存连接
-              </button>
+              <div className="row row-workbench">
+                <button className="btn btn-workbench-sm" type="submit">
+                  {editingConnectionId ? "保存修改" : "保存连接"}
+                </button>
+                {editingConnectionId ? (
+                  <button type="button" className="btn ghost btn-workbench-sm" onClick={cancelEditConnection}>
+                    取消编辑
+                  </button>
+                ) : null}
+              </div>
             </form>
 
             <div className="conn-list-workbench">
@@ -435,7 +497,6 @@ function MainView() {
                   <div className="conn-row-workbench-main">
                     <div className="conn-row-workbench-title">
                       <strong className="conn-row-workbench-name">{c.name}</strong>
-                      {c.favorite ? <span className="conn-row-pill">收藏</span> : null}
                     </div>
                     <span className="conn-row-workbench-meta">
                       {c.driver} · {c.host}:{c.port}
@@ -449,14 +510,8 @@ function MainView() {
                     >
                       测试
                     </button>
-                    <button
-                      type="button"
-                      className="btn ghost btn-workbench-xs"
-                      onClick={() =>
-                        api.setConnectionFavorite(c.id, !c.favorite).then(() => loadConnections(selectedGroupId))
-                      }
-                    >
-                      {c.favorite ? "取消" : "收藏"}
+                    <button type="button" className="btn ghost btn-workbench-xs" onClick={() => startEditConnection(c)}>
+                      编辑
                     </button>
                     <button
                       type="button"
@@ -1706,9 +1761,19 @@ function StudioView({ groupId }: { groupId: string }) {
             </div>
 
             {activeTab?.type === "sql" && (
-              <div className="flex min-h-0 flex-1 flex-col">
+              <div
+                className={
+                  showSqlResultPane
+                    ? "flex shrink-0 flex-col"
+                    : "flex min-h-0 flex-1 flex-col"
+                }
+              >
                 <div
-                  className="min-h-0 flex-1 bg-white"
+                  className={
+                    showSqlResultPane
+                      ? "shrink-0 bg-white"
+                      : "min-h-0 flex-1 bg-white"
+                  }
                   style={showSqlResultPane ? { height: `${editorHeight}px` } : { flex: 1, minHeight: 0 }}
                 >
                   <SqlEditorWithGutter
@@ -1726,7 +1791,7 @@ function StudioView({ groupId }: { groupId: string }) {
             {showSqlResultPane && (
               <>
                 <div
-                  className="h-1 shrink-0 cursor-row-resize bg-slate-200 hover:bg-blue-300/60"
+                  className="relative z-10 h-2 shrink-0 cursor-row-resize bg-slate-200 hover:bg-blue-300/60"
                   onMouseDown={startEditorResize}
                   title="拖拽调整编辑器/结果高度"
                 />
@@ -1747,6 +1812,7 @@ function StudioView({ groupId }: { groupId: string }) {
                         <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
                           <VirtualResultGrid
                             columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                            columnTypes={activeTabResult.columnTypes}
                             rows={activeTabResult.rows as Array<Record<string, unknown>>}
                             displayTimezone={displayTimezone}
                             onCopyError={(msg) => setError(msg)}
@@ -1782,6 +1848,7 @@ function StudioView({ groupId }: { groupId: string }) {
                         <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
                           <VirtualResultGrid
                             columns={activeTabResult.columns}
+                            columnTypes={activeTabResult.columnTypes}
                             rows={(activeTabResult.rows ?? []) as Array<Record<string, unknown>>}
                             displayTimezone={displayTimezone}
                             serverMode
@@ -2082,6 +2149,7 @@ type HeaderBounds = { x: number; y: number; width: number; height: number };
 
 function VirtualResultGrid({
   columns,
+  columnTypes,
   rows,
   onCopyError,
   displayTimezone,
@@ -2092,6 +2160,8 @@ function VirtualResultGrid({
   onSortOrder,
 }: {
   columns: string[];
+  /** 与 columns 同序；缺省时不提供「查看完整内容」 */
+  columnTypes?: string[];
   rows: Array<Record<string, unknown>>;
   onCopyError: (msg: string) => void;
   displayTimezone: string;
@@ -2107,9 +2177,13 @@ function VirtualResultGrid({
   const [gridSize, setGridSize] = useState({ width: 900, height: 360 });
   const [ctxMenu, setCtxMenu] = useState<{ left: number; top: number } | null>(null);
   const [sortMenu, setSortMenu] = useState<{ colIndex: number; bounds: HeaderBounds } | null>(null);
+  const [cellDetail, setCellDetail] = useState<{ column: string; rowLabel: string; text: string } | null>(null);
   const gridHostRef = useRef<HTMLDivElement | null>(null);
   const dataEditorRef = useRef<DataEditorRef | null>(null);
   const lastContextClientPosRef = useRef<{ x: number; y: number } | null>(null);
+  const contextMenuCellRef = useRef<Item | null>(null);
+  /** glide-data-grid 在任意两次 mouseup 间隔 <500ms 都会设 isDoubleClick，不校验是否同一格；此处自行判定「同格双击」 */
+  const lastCellPointerRef = useRef<{ col: number; row: number; at: number } | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -2164,6 +2238,39 @@ function VirtualResultGrid({
     };
   }, [sortMenu]);
 
+  useEffect(() => {
+    if (!cellDetail) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCellDetail(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cellDetail]);
+
+  const markerStart = serverMode ? rowNumberStart : pageStart + 1;
+
+  const openCellDetail = useCallback(
+    (cell: Item) => {
+      const [c, r] = cell;
+      if (r < 0 || c < 0 || c >= columns.length) return;
+      const dbType = columnTypes?.[c];
+      if (!isExpandableLongTextColumnType(dbType)) return;
+      const colName = columns[c];
+      if (colName == null) return;
+      const raw = pageRows[r]?.[colName];
+      const text =
+        raw === null || raw === undefined
+          ? "null"
+          : formatCellForTimezone(raw, colName, displayTimezone);
+      setCellDetail({
+        column: colName,
+        rowLabel: String(markerStart + r),
+        text,
+      });
+    },
+    [columns, columnTypes, pageRows, displayTimezone, markerStart],
+  );
+
   const gridColumns: GridColumn[] = useMemo(
     () =>
       columns.map((name) => {
@@ -2179,8 +2286,6 @@ function VirtualResultGrid({
       }),
     [columns, serverMode, onSortOrder],
   );
-
-  const markerStart = serverMode ? rowNumberStart : pageStart + 1;
 
   const getCellContent = useMemo(() => {
     return ([col, row]: Item): GridCell => {
@@ -2251,8 +2356,28 @@ function VirtualResultGrid({
                 }
               : undefined
           }
-          onCellContextMenu={(_cell, event) => {
+          onCellClicked={(cell) => {
+            const [c, r] = cell;
+            if (r < 0 || c < 0 || c >= columns.length) return;
+            const dbType = columnTypes?.[c];
+            if (!isExpandableLongTextColumnType(dbType)) {
+              lastCellPointerRef.current = null;
+              return;
+            }
+            const now = Date.now();
+            const prev = lastCellPointerRef.current;
+            const sameCell =
+              prev != null && prev.col === c && prev.row === r && now - prev.at < 400;
+            if (sameCell) {
+              lastCellPointerRef.current = null;
+              openCellDetail(cell);
+              return;
+            }
+            lastCellPointerRef.current = { col: c, row: r, at: now };
+          }}
+          onCellContextMenu={(cell, event) => {
             event.preventDefault();
+            contextMenuCellRef.current = cell;
             const pos = lastContextClientPosRef.current;
             if (pos) {
               setCtxMenu({ left: pos.x, top: pos.y });
@@ -2286,6 +2411,22 @@ function VirtualResultGrid({
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {contextMenuCellRef.current != null &&
+          contextMenuCellRef.current[1] >= 0 &&
+          contextMenuCellRef.current[0] >= 0 &&
+          isExpandableLongTextColumnType(columnTypes?.[contextMenuCellRef.current[0]]) ? (
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                const c = contextMenuCellRef.current;
+                if (c) openCellDetail(c);
+                setCtxMenu(null);
+              }}
+            >
+              查看完整内容
+            </button>
+          ) : null}
           <button className="context-menu-item" onClick={() => void copySelection().then(() => setCtxMenu(null))}>
             复制
           </button>
@@ -2323,6 +2464,46 @@ function VirtualResultGrid({
               >
                 降序
               </button>
+            </div>,
+            document.body,
+          )
+        : null}
+      {cellDetail
+        ? createPortal(
+            <div
+              className="modal-mask"
+              style={{ zIndex: 10001 }}
+              role="presentation"
+              onClick={() => setCellDetail(null)}
+            >
+              <div className="modal-panel large" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-head">
+                  <h3 className="text-sm font-medium text-slate-800">
+                    {cellDetail.column} · 行 {cellDetail.rowLabel}
+                  </h3>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      className="btn ghost text-xs"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(cellDetail.text).catch(() => onCopyError("复制失败"));
+                      }}
+                    >
+                      复制
+                    </button>
+                    <button type="button" className="btn ghost text-xs" onClick={() => setCellDetail(null)}>
+                      关闭
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  readOnly
+                  className="w-full min-h-[200px] max-h-[min(60vh,480px)] resize-y rounded border border-slate-200 bg-slate-50 p-2 font-mono text-[11px] leading-relaxed text-slate-800"
+                  value={cellDetail.text}
+                  aria-label="单元格完整内容"
+                />
+                <p className="mt-2 text-[11px] text-slate-500">共 {cellDetail.text.length} 字符</p>
+              </div>
             </div>,
             document.body,
           )

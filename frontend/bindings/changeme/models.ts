@@ -614,6 +614,7 @@ export class InsertRowsRequest {
 
 export class QueryResultPage {
     "columns": string[];
+    "columnTypes"?: string[];
     "rows": { [_ in string]?: any }[];
     "total": number;
     "offset": number;
@@ -649,13 +650,17 @@ export class QueryResultPage {
      */
     static createFrom($$source: any = {}): QueryResultPage {
         const $$createField0_0 = $$createType0;
-        const $$createField1_0 = $$createType2;
+        const $$createField1_0 = $$createType0;
+        const $$createField2_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField0_0($$parsedSource["columns"]);
         }
+        if ("columnTypes" in $$parsedSource) {
+            $$parsedSource["columnTypes"] = $$createField1_0($$parsedSource["columnTypes"]);
+        }
         if ("rows" in $$parsedSource) {
-            $$parsedSource["rows"] = $$createField1_0($$parsedSource["rows"]);
+            $$parsedSource["rows"] = $$createField2_0($$parsedSource["rows"]);
         }
         return new QueryResultPage($$parsedSource as Partial<QueryResultPage>);
     }
@@ -663,6 +668,11 @@ export class QueryResultPage {
 
 export class SQLExecutionResult {
     "columns"?: string[];
+
+    /**
+     * 与 columns 同序，驱动返回的 DatabaseTypeName（小写）
+     */
+    "columnTypes"?: string[];
     "rows"?: { [_ in string]?: any }[];
     "rowsAffected": number;
     "lastInsertId": number;
@@ -697,17 +707,21 @@ export class SQLExecutionResult {
      */
     static createFrom($$source: any = {}): SQLExecutionResult {
         const $$createField0_0 = $$createType0;
-        const $$createField1_0 = $$createType2;
-        const $$createField7_0 = $$createType0;
+        const $$createField1_0 = $$createType0;
+        const $$createField2_0 = $$createType2;
+        const $$createField8_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField0_0($$parsedSource["columns"]);
         }
+        if ("columnTypes" in $$parsedSource) {
+            $$parsedSource["columnTypes"] = $$createField1_0($$parsedSource["columnTypes"]);
+        }
         if ("rows" in $$parsedSource) {
-            $$parsedSource["rows"] = $$createField1_0($$parsedSource["rows"]);
+            $$parsedSource["rows"] = $$createField2_0($$parsedSource["rows"]);
         }
         if ("execLog" in $$parsedSource) {
-            $$parsedSource["execLog"] = $$createField7_0($$parsedSource["execLog"]);
+            $$parsedSource["execLog"] = $$createField8_0($$parsedSource["execLog"]);
         }
         return new SQLExecutionResult($$parsedSource as Partial<SQLExecutionResult>);
     }

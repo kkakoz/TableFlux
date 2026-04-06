@@ -39,10 +39,10 @@ export const api = {
     WorkspaceService.ListGroupConnections(groupId) as Promise<ConnectionMeta[]>,
   createConnection: (payload: Record<string, unknown>) =>
     WorkspaceService.CreateConnection(payload as any),
+  updateConnection: (connectionId: string, payload: Record<string, unknown>) =>
+    WorkspaceService.UpdateConnection(connectionId, payload as any),
   deleteConnection: (connectionId: string) => WorkspaceService.DeleteConnection(connectionId),
   testConnection: (connectionId: string) => WorkspaceService.TestConnection(connectionId),
-  setConnectionFavorite: (connectionId: string, favorite: boolean) =>
-    WorkspaceService.SetConnectionFavorite(connectionId, favorite),
 
   openGroupWindow: (groupId: string) => StudioWindowService.OpenGroupWindow(groupId),
 

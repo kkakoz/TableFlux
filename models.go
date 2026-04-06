@@ -81,6 +81,7 @@ type ExecuteSQLRequest struct {
 
 type SQLExecutionResult struct {
 	Columns      []string         `json:"columns,omitempty"`
+	ColumnTypes  []string         `json:"columnTypes,omitempty"` // 与 columns 同序，驱动返回的 DatabaseTypeName（小写）
 	Rows         []map[string]any `json:"rows,omitempty"`
 	RowsAffected int64            `json:"rowsAffected"`
 	LastInsertID int64            `json:"lastInsertId"`
@@ -91,12 +92,13 @@ type SQLExecutionResult struct {
 }
 
 type QueryResultPage struct {
-	Columns    []string         `json:"columns"`
-	Rows       []map[string]any `json:"rows"`
-	Total      int              `json:"total"`
-	Offset     int              `json:"offset"`
-	Limit      int              `json:"limit"`
-	DurationMs int64            `json:"durationMs"`
+	Columns      []string         `json:"columns"`
+	ColumnTypes  []string         `json:"columnTypes,omitempty"`
+	Rows         []map[string]any `json:"rows"`
+	Total        int              `json:"total"`
+	Offset       int              `json:"offset"`
+	Limit        int              `json:"limit"`
+	DurationMs   int64            `json:"durationMs"`
 }
 
 type TableQueryRequest struct {

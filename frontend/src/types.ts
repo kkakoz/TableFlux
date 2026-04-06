@@ -34,6 +34,8 @@ export type VaultStatus = {
 
 export type ExecuteSQLResult = {
   columns?: string[];
+  /** 与 columns 同序，驱动 DatabaseTypeName（小写）；用于「查看完整内容」等按列类型门禁 */
+  columnTypes?: string[];
   rows?: Array<Record<string, unknown>>;
   rowsAffected: number;
   lastInsertId: number;
