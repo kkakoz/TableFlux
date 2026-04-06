@@ -1338,30 +1338,6 @@ th {
   margin-bottom: 10px;
 }
 
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.history-item {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  text-align: left;
-  padding: 8px 10px;
-  cursor: pointer;
-}
-
-.history-item pre {
-  margin: 6px 0 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 180px;
-  overflow: auto;
-  font-size: 12px;
-}
-
 .migration-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -50,11 +50,13 @@ export default function ConnectionListPanel({
           </div>
         </div>
         <div className="relative min-w-[160px] max-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
-            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-7 pr-2 text-[12px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15"
+            type="search"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="搜索连接…"
+            autoComplete="off"
+            className="h-10 w-full rounded-lg border border-slate-200 bg-white py-0 pl-10 pr-10 text-[12px] leading-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15"
           />
         </div>
         <button

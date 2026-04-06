@@ -27,6 +27,8 @@ import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal
 import { formatCellForTimezone, readDisplayTimezone } from "./components/studio/timezoneDisplay";
 import { TableQueryRequest } from "../bindings/changeme";
 import SqlEditorWithGutter from "./components/studio/SqlEditorWithGutter";
+import SqlHistoryModal from "./components/studio/SqlHistoryModal";
+import { pushSqlHistory, readSqlHistory } from "./utils/sqlHistory";
 import { findStatementAtLine, parseSqlStatements, splitStatementsBySemicolon } from "./utils/sqlStatements";
 import {
   extractQualifierBeforeDot,
@@ -191,36 +193,6 @@ const GRID_HEADER_HEIGHT = 34;
 const GRID_NULL_TEXT = "#94a3b8";
 const ROW_MARKER_WIDTH = 46;
 
-const SQL_HISTORY_KEY = "tableflux.sql_history";
-const SQL_HISTORY_LIMIT = 100;
-
-type SqlHistoryItem = {
-  id: string;
-  sql: string;
-  at: number;
-};
-
-function readSqlHistory(): SqlHistoryItem[] {
-  try {
-    const raw = localStorage.getItem(SQL_HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as SqlHistoryItem[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function pushSqlHistory(sql: string) {
-  const text = (sql || "").trim();
-  if (!text) return;
-  const next: SqlHistoryItem[] = [
-    { id: crypto.randomUUID(), sql: text, at: Date.now() },
-    ...readSqlHistory().filter((i) => i.sql !== text),
-  ].slice(0, SQL_HISTORY_LIMIT);
-  localStorage.setItem(SQL_HISTORY_KEY, JSON.stringify(next));
-}
-
 function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const studioGroupId = params.get("groupId") ?? "";
@@ -244,6 +216,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const [sidebarWidth, setSidebarWidth] = useState(272);
   const [editorHeight, setEditorHeight] = useState(340);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRev, setHistoryRev] = useState(0);
   const [migrationOpen, setMigrationOpen] = useState(false);
@@ -615,6 +588,17 @@ function StudioView({ groupId }: { groupId: string }) {
     window.addEventListener("tableflux-timezone-change", onTz);
     return () => window.removeEventListener("tableflux-timezone-change", onTz);
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!activeConnectionId) {
@@ -1249,8 +1233,8 @@ function StudioView({ groupId }: { groupId: string }) {
           className="flex min-h-0 w-[var(--sw)] shrink-0 flex-col border-r border-slate-200 bg-white"
           style={{ ["--sw" as string]: `${sidebarWidth}px`, width: sidebarWidth }}
         >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
-            <div className="relative shrink-0">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
+            <div ref={menuRef} className="relative shrink-0">
               <button
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-600 hover:bg-slate-100"
                 type="button"
@@ -1667,28 +1651,14 @@ function StudioView({ groupId }: { groupId: string }) {
         onSave={(next) => persistVisibleDbs(next)}
       />
 
-        {historyOpen && (
-          <div className="modal-mask" onClick={() => setHistoryOpen(false)}>
-            <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-head">
-                <h3>历史执行 SQL</h3>
-                <button className="btn ghost" onClick={() => setHistoryOpen(false)}>关闭</button>
-              </div>
-              <div className="history-list">
-                {historyEntries.length === 0 ? (
-                  <p className="sub">暂无历史记录</p>
-                ) : (
-                  historyEntries.map((item) => (
-                    <button key={item.id} className="history-item" onClick={() => useHistorySql(item.sql)}>
-                      <span className="sub">{new Date(item.at).toLocaleString()}</span>
-                      <pre>{item.sql.length > 500 ? `${item.sql.slice(0, 500)}...` : item.sql}</pre>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <SqlHistoryModal
+          open={historyOpen}
+          items={historyEntries}
+          onClose={() => setHistoryOpen(false)}
+          onLoadToEditor={useHistorySql}
+          onCleared={() => setHistoryRev((r) => r + 1)}
+          onCopyError={(msg) => setError(msg)}
+        />
 
         {aiAssistOpen && aiAssistPos && (
           <>
