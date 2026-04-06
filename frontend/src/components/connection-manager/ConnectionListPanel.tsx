@@ -1,4 +1,4 @@
-import { Plus, Search } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { ConnectionMeta } from "../../types";
 import ConnectionCard from "./ConnectionCard";
 

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Copy, History, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, History, Trash2, X } from "lucide-react";
 import { clearSqlHistory, type SqlHistoryItem } from "../../utils/sqlHistory";
 import {
   classifySql,
