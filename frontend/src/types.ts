@@ -25,6 +25,8 @@ export type ConnectionMeta = {
   lastHealthCheckAt?: string;
   lastHealthCheckOk: boolean;
   lastHealthCheckError?: string;
+  /** 后端返回时可能包含，用于列表展示 */
+  updatedAt?: string;
 };
 
 export type VaultStatus = {
