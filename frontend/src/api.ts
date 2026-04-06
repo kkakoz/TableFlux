@@ -12,9 +12,11 @@ import {
   GroupCreateRequest,
   SaveStudioSessionRequest,
   type StudioSessionSnapshot,
+  TableSchemaRequest,
   type VaultStatus,
   type WorkspaceGroup,
 } from "../bindings/changeme";
+import type { TableSchemaRequest as TableSchemaRequestFields } from "./types";
 
 export const api = {
   getVaultStatus: () => SecretService.GetVaultStatus() as Promise<VaultStatus>,
@@ -45,6 +47,8 @@ export const api = {
   listDatabases: (connectionId: string) => DatabaseService.ListDatabases(connectionId),
   listTables: (connectionId: string, database: string, schema = "") =>
     DatabaseService.ListTables(connectionId, database, schema),
+  getTableSchema: (req: TableSchemaRequestFields) =>
+    DatabaseService.GetTableSchema(new TableSchemaRequest(req)),
   explainSQL: (req: any) => DatabaseService.ExplainSQL(req),
   migrateTableData: (req: Record<string, unknown>) => DatabaseService.MigrateTableData(req as any),
 

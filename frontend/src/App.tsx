@@ -10,12 +10,13 @@ import {
   type Theme,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import type { editor as MonacoEditorNS, IDisposable, languages } from "monaco-editor";
+import type { editor as MonacoEditorNS, IDisposable, IRange, languages } from "monaco-editor";
 import { Database, History, Menu, Play, RefreshCw, Settings2 } from "lucide-react";
 import { api } from "./api";
 import type {
   ConnectionMeta,
   ExecuteSQLResult,
+  TableSchema,
   WorkspaceGroup,
 } from "./types";
 import SettingsPanel from "./components/SettingsPanel";
@@ -23,6 +24,11 @@ import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal
 import { readDisplayTimezone } from "./components/studio/timezoneDisplay";
 import SqlEditorWithGutter from "./components/studio/SqlEditorWithGutter";
 import { findStatementAtLine, parseSqlStatements, splitStatementsBySemicolon } from "./utils/sqlStatements";
+import {
+  extractQualifierBeforeDot,
+  mergeDotCompletionItems,
+  resolveTableSchemaRequest,
+} from "./utils/sqlDotCompletion";
 
 type ViewMode = "main" | "studio";
 type DbTreeNode = {
@@ -464,6 +470,12 @@ function StudioView({ groupId }: { groupId: string }) {
   const [displayTimezone, setDisplayTimezone] = useState(() => readDisplayTimezone());
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
+  const completionContextRef = useRef<{
+    connectionId: string;
+    database: string;
+    dialect: "mysql" | "postgres";
+  }>({ connectionId: "", database: "", dialect: "mysql" });
+  const tableSchemaCacheRef = useRef<Map<string, TableSchema>>(new Map());
   const completionDisposableRef = useRef<IDisposable | null>(null);
   const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
   const runSQLSingleAtCursorRef = useRef<() => void>(() => {});
@@ -518,6 +530,18 @@ function StudioView({ groupId }: { groupId: string }) {
     const allTables = dbTree.flatMap((db) => db.tables);
     completionWordsRef.current = [...new Set([...SQL_KEYWORDS, ...allTables])];
   }, [dbTree]);
+
+  useEffect(() => {
+    completionContextRef.current = {
+      connectionId: activeConnectionId,
+      database: selectedDatabase,
+      dialect: sqlDialect,
+    };
+  }, [activeConnectionId, selectedDatabase, sqlDialect]);
+
+  useEffect(() => {
+    tableSchemaCacheRef.current.clear();
+  }, [activeConnectionId, selectedDatabase]);
 
   useEffect(() => {
     if (!groupId) return;
@@ -1209,15 +1233,54 @@ function StudioView({ groupId }: { groupId: string }) {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL, () => openAiAssistRef.current());
     if (!completionDisposableRef.current) {
       completionDisposableRef.current = monaco.languages.registerCompletionItemProvider("sql", {
-        provideCompletionItems: (model, position) => {
+        triggerCharacters: ["."],
+        provideCompletionItems: async (model, position) => {
           const word = model.getWordUntilPosition(position);
-          const range = {
+          const range: IRange = {
             startLineNumber: position.lineNumber,
             endLineNumber: position.lineNumber,
             startColumn: word.startColumn,
             endColumn: word.endColumn,
           };
-          const suggestions: languages.CompletionItem[] = completionWordsRef.current.map((kw) => ({
+          const keywords = completionWordsRef.current;
+          const ctx = completionContextRef.current;
+          const line = model.getLineContent(position.lineNumber);
+          const qualifier = extractQualifierBeforeDot(line, position.column);
+
+          if (qualifier && ctx.connectionId && ctx.database) {
+            const req = resolveTableSchemaRequest(qualifier, ctx);
+            if (req) {
+              const cacheKey = `${ctx.connectionId}|${req.database}|${req.schema}|${req.table}`;
+              let schema = tableSchemaCacheRef.current.get(cacheKey);
+              if (!schema) {
+                try {
+                  schema = (await api.getTableSchema({
+                    connectionId: ctx.connectionId,
+                    database: req.database,
+                    schema: req.schema,
+                    table: req.table,
+                  })) as TableSchema;
+                  tableSchemaCacheRef.current.set(cacheKey, schema);
+                } catch {
+                  schema = undefined;
+                }
+              }
+              if (schema?.columns) {
+                return {
+                  suggestions: mergeDotCompletionItems(monaco, range, schema.columns, keywords),
+                };
+              }
+            }
+            const keywordOnly: languages.CompletionItem[] = keywords.map((kw) => ({
+              label: kw,
+              kind: monaco.languages.CompletionItemKind.Keyword,
+              insertText: kw,
+              range,
+            }));
+            return { suggestions: keywordOnly };
+          }
+
+          const suggestions: languages.CompletionItem[] = keywords.map((kw) => ({
             label: kw,
             kind: monaco.languages.CompletionItemKind.Keyword,
             insertText: kw,
