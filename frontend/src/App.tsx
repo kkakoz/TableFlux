@@ -13,7 +13,7 @@ import {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { editor as MonacoEditorNS, IDisposable, IRange, languages } from "monaco-editor";
-import { Database, History, Menu, Play, RefreshCw, Settings2 } from "lucide-react";
+import { Database, History, Menu, Play, RefreshCw, Settings2, SquareCode, Table2, X } from "lucide-react";
 import { api } from "./api";
 import type {
   ConnectionMeta,
@@ -185,13 +185,21 @@ const gridTheme: Theme = {
   horizontalBorderColor: "#e2e8f0",
   accentColor: "#2563eb",
   accentLight: "rgba(37, 99, 235, 0.12)",
+  baseFontStyle: "11px",
+  headerFontStyle: "600 11px",
+  editorFontSize: "11px",
+  markerFontStyle: "9px",
+  lineHeight: 1.35,
+  cellVerticalPadding: 2,
+  cellHorizontalPadding: 6,
+  headerIconSize: 14,
 };
 
-const GRID_ROW_HEIGHT = 32;
-const GRID_HEADER_HEIGHT = 34;
+const GRID_ROW_HEIGHT = 26;
+const GRID_HEADER_HEIGHT = 28;
 /** 结果表 NULL 占位（与 slate-400 接近，区别于正文） */
 const GRID_NULL_TEXT = "#94a3b8";
-const ROW_MARKER_WIDTH = 46;
+const ROW_MARKER_WIDTH = 40;
 
 function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -731,18 +739,12 @@ function StudioView({ groupId }: { groupId: string }) {
   const filteredTree = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
     if (!q) {
-      return baseObjectTree.map((d) => ({ ...d, visibleTables: d.tables, forceExpanded: false })).filter(Boolean);
+      return baseObjectTree.map((d) => ({ ...d, visibleTables: d.tables })).filter(Boolean);
     }
-    return baseObjectTree
-      .map((d) => {
-        const dbMatched = d.name.toLowerCase().includes(q);
-        const visibleTables = d.tables.filter((t) => t.toLowerCase().includes(q));
-        if (!dbMatched && visibleTables.length === 0) {
-          return null;
-        }
-        return { ...d, visibleTables: dbMatched ? d.tables : visibleTables, forceExpanded: true };
-      })
-      .filter((d): d is DbTreeNode & { visibleTables: string[]; forceExpanded: boolean } => Boolean(d));
+    return baseObjectTree.map((d) => {
+      const visibleTables = d.expanded ? d.tables.filter((t) => t.toLowerCase().includes(q)) : d.tables;
+      return { ...d, visibleTables };
+    });
   }, [baseObjectTree, tableFilter]);
 
   const upsertDatabaseTabs = (dbName: string, updater: (tabs: WorkbenchTab[]) => WorkbenchTab[]) => {
@@ -1280,35 +1282,49 @@ function StudioView({ groupId }: { groupId: string }) {
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto px-1 py-2">
+          <div className="tf-studio-object-tree min-h-0 flex-1 overflow-auto px-0.5 py-1">
             {/*<div className="px-2 pb-1 text-[11px] font-semibold text-slate-500">对象树</div>*/}
-            <div className="space-y-0.5">
+            <div className="space-y-0">
               {filteredTree.map((db) => {
-                const expanded = db.forceExpanded || db.expanded;
+                const expanded = db.expanded;
+                const filterQ = tableFilter.trim();
                 return (
-                  <div key={db.name} className="rounded-tf border border-transparent">
+                  <div key={db.name} className="rounded-sm border border-transparent">
                     <button
                       type="button"
-                      className={`flex w-full items-center gap-0.5 rounded-tf px-1 py-1 text-left ${
-                        selectedDatabase === db.name ? "bg-blue-50 ring-1 ring-blue-100" : "hover:bg-slate-50"
+                      className={`flex w-full items-center gap-0.5 rounded-sm px-0.5 py-px text-left ${
+                        selectedDatabase === db.name
+                          ? "bg-slate-100 ring-1 ring-slate-200/90"
+                          : "hover:bg-slate-50/90"
                       }`}
                       onClick={() => void toggleDatabaseExpand(db.name)}
                       title={expanded ? "收起表列表" : "展开表列表"}
                     >
-                      <span className="w-6 shrink-0 select-none text-xs text-slate-500">{expanded ? "▾" : "▸"}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-slate-800">{db.name}</span>
+                      <span className="w-4 shrink-0 select-none text-[10px] leading-none text-slate-400">
+                        {expanded ? "▾" : "▸"}
+                      </span>
+                      <Database className="h-3 w-3 shrink-0 text-slate-500" strokeWidth={2} aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-slate-800">
+                        {db.name}
+                      </span>
                     </button>
                     {expanded && (
-                      <div className="ml-4 border-l border-slate-200 pl-2">
-                        {db.visibleTables.length === 0 && <div className="py-1 text-[11px] text-slate-400">暂无表</div>}
+                      <div className="ml-2 border-l border-slate-200/80 pl-1.5 pt-px">
+                        {db.visibleTables.length === 0 && (
+                          <div className="py-px pl-0.5 text-[10px] text-slate-400">
+                            {filterQ && db.loaded && db.tables.length > 0 ? "无匹配" : "暂无表"}
+                          </div>
+                        )}
                         {db.visibleTables.map((tableName) => (
                           <button
                             key={`${db.name}.${tableName}`}
                             type="button"
-                            className="block w-full truncate rounded px-2 py-1 text-left font-mono text-xs font-medium text-slate-800 hover:bg-slate-100"
+                            title={tableName}
+                            className="mb-px flex w-full min-w-0 items-center gap-1 rounded-sm py-px pl-0.5 pr-1 text-left font-mono text-[10px] font-normal text-slate-700 hover:bg-slate-50"
                             onClick={() => appendSelectSQL(db.name, tableName)}
                           >
-                            {tableName}
+                            <Table2 className="h-2.5 w-2.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
+                            <span className="min-w-0 flex-1 truncate">{tableName}</span>
                           </button>
                         ))}
                       </div>
@@ -1318,13 +1334,13 @@ function StudioView({ groupId }: { groupId: string }) {
               })}
             </div>
           </div>
-          <div className="shrink-0 border-t border-slate-200 p-2">
+          <div className="shrink-0 border-t border-slate-200 px-1.5 py-1.5">
             <input
-              className="w-full rounded-tf border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-800 outline-none ring-blue-500/30 focus:border-blue-300 focus:ring-2"
+              className="h-6 w-full rounded border border-slate-200 bg-slate-50 px-1.5 text-[11px] leading-tight text-slate-800 outline-none ring-blue-500/30 focus:border-blue-300 focus:ring-2"
               value={tableFilter}
               onChange={(e) => setTableFilter(e.target.value)}
-              placeholder="过滤库/表…"
-              aria-label="搜索过滤"
+              placeholder="搜索表（仅已展开的库）"
+              aria-label="搜索表"
             />
           </div>
         </aside>
@@ -1425,31 +1441,49 @@ function StudioView({ groupId }: { groupId: string }) {
               </div>
             </header>
 
-            <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50/80 px-2 py-1.5">
-              {visibleTabs.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`group inline-flex max-w-[200px] items-center gap-1 rounded-md border px-2 py-1 text-xs ${
-                    t.id === activeTab?.id
-                      ? "border-blue-200 bg-white text-blue-800 shadow-sm"
-                      : "border-transparent bg-transparent text-slate-600 hover:bg-white"
-                  }`}
-                  onClick={() => setActiveForDatabase(selectedDatabase, t.id)}
-                >
-                  <span className="truncate">{t.type === "table" ? `表 · ${t.title}` : t.title}</span>
-                  <span
-                    className="rounded px-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    role="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeTab(t.id);
-                    }}
+            <div className="tf-studio-tab-strip flex h-7 shrink-0 items-stretch gap-px overflow-x-auto border-b border-slate-200 bg-slate-100/90 px-0.5">
+              {visibleTabs.map((t) => {
+                const isActive = t.id === activeTab?.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    title={t.title}
+                    className={`group/tab inline-flex h-6 min-w-0 max-w-[min(220px,32vw)] items-center gap-0.5 rounded-sm border px-1 text-left text-[11px] leading-none ${
+                      isActive
+                        ? "border-slate-200/90 bg-white font-medium text-slate-900 shadow-sm"
+                        : "border-transparent bg-transparent font-normal text-slate-500 hover:bg-slate-200/40 hover:text-slate-700"
+                    }`}
+                    onClick={() => setActiveForDatabase(selectedDatabase, t.id)}
                   >
-                    ×
-                  </span>
-                </button>
-              ))}
+                    {t.type === "sql" ? (
+                      <SquareCode
+                        className={`h-3 w-3 shrink-0 ${isActive ? "text-slate-600" : "text-slate-400"}`}
+                        strokeWidth={2}
+                        aria-hidden
+                      />
+                    ) : (
+                      <Table2
+                        className={`h-3 w-3 shrink-0 ${isActive ? "text-slate-600" : "text-slate-400"}`}
+                        strokeWidth={2}
+                        aria-hidden
+                      />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                    <span
+                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-slate-400 opacity-35 transition-[opacity,background-color,color] hover:bg-slate-200/80 hover:text-slate-700 hover:opacity-100 group-hover/tab:opacity-80"
+                      role="button"
+                      aria-label="关闭标签"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeTab(t.id);
+                      }}
+                    >
+                      <X className="h-2.5 w-2.5" strokeWidth={2} />
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             {activeTab?.type === "sql" && (

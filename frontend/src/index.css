@@ -54,3 +54,19 @@ body,
 .tf-studio-root .monaco-editor-background {
   background-color: #ffffff !important;
 }
+
+/*
+ * public/style.css 中 `button, … { font: inherit }` 会让按钮继承 body 默认 ~16px，
+ * Tailwind 的 text-[10px] 等在部分 WebView/层叠顺序下仍显大。
+ * 为对象树与 Tab 条设明确基准字号，按钮继承该值；内层仍可用 Tailwind 再缩小表名等。
+ */
+.tf-studio-object-tree,
+.tf-studio-tab-strip {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.tf-studio-object-tree button,
+.tf-studio-tab-strip button {
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+}
