@@ -14,10 +14,13 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { editor as MonacoEditorNS, IDisposable, IRange, languages } from "monaco-editor";
 import {
+  Ban,
+  ChevronLeft,
   ChevronRight,
   Database,
   History,
   House,
+  Loader2,
   Menu,
   Play,
   RefreshCw,
@@ -77,6 +80,10 @@ type WorkbenchTab = {
   tablePageLimit?: number;
   tableSortColumn?: string;
   tableSortDesc?: boolean;
+  /** 表标签：正在请求分页/排序数据 */
+  tableQueryLoading?: boolean;
+  /** 查询标签：正在执行 SQL 或 EXPLAIN */
+  sqlResultLoading?: boolean;
 };
 
 const createSqlTab = (index: number, connectionId: string, database: string): WorkbenchTab => ({
@@ -320,6 +327,13 @@ function StudioView({ groupId }: { groupId: string }) {
     ) => {
       if (!activeConnectionId) return;
       const key = `${activeConnectionId}::${dbName || "__none__"}`;
+      setTabsByDatabase((prev) => {
+        const list = prev[key] ?? [];
+        return {
+          ...prev,
+          [key]: list.map((t) => (t.id === tabId ? { ...t, tableQueryLoading: true } : t)),
+        };
+      });
       try {
         const limit = await resolveQueryLimit();
         const page = await api.queryTablePage(
@@ -351,6 +365,7 @@ function StudioView({ groupId }: { groupId: string }) {
               t.id === tabId
                 ? {
                     ...t,
+                    tableQueryLoading: false,
                     result,
                     error: "",
                     lastExecutedSql: lastSql,
@@ -370,7 +385,7 @@ function StudioView({ groupId }: { groupId: string }) {
           return {
             ...prev,
             [key]: list.map((t) =>
-              t.id === tabId ? { ...t, error: String(e), result: null } : t,
+              t.id === tabId ? { ...t, tableQueryLoading: false, error: String(e), result: null } : t,
             ),
           };
         });
@@ -842,6 +857,9 @@ function StudioView({ groupId }: { groupId: string }) {
     if (!activeConnectionId || !activeTab) return;
     const trimmed = (sql || "").trim();
     if (!trimmed) return;
+    upsertDatabaseTabs(selectedDatabase, (list) =>
+      list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: true } : t))
+    );
     try {
       const r = await api.executeSQL({
         connectionId: activeConnectionId,
@@ -854,12 +872,18 @@ function StudioView({ groupId }: { groupId: string }) {
       pushSqlHistory(trimmed);
       setHistoryRev((n) => n + 1);
       upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "", lastExecutedSql: trimmed } : t))
+        list.map((t) =>
+          t.id === activeTab.id ? { ...t, sqlResultLoading: false, result: r, error: "", lastExecutedSql: trimmed } : t,
+        )
       );
       setError("");
     } catch (e) {
       upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, error: String(e), result: null, lastExecutedSql: trimmed } : t))
+        list.map((t) =>
+          t.id === activeTab.id
+            ? { ...t, sqlResultLoading: false, error: String(e), result: null, lastExecutedSql: trimmed }
+            : t,
+        )
       );
       setError(String(e));
     }
@@ -1011,14 +1035,22 @@ function StudioView({ groupId }: { groupId: string }) {
     }
     const trimmed = sqlText.trim();
     if (!trimmed) return;
+    upsertDatabaseTabs(selectedDatabase, (list) =>
+      list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: true } : t))
+    );
     try {
       const explainSql = `EXPLAIN ${trimmed}`;
       const r = await api.explainSQL({ connectionId: activeConnectionId, database: selectedDatabase, sql: trimmed });
       upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, result: r, error: "", lastExecutedSql: explainSql } : t))
+        list.map((t) =>
+          t.id === activeTab.id ? { ...t, sqlResultLoading: false, result: r, error: "", lastExecutedSql: explainSql } : t,
+        )
       );
       setError("");
     } catch (e) {
+      upsertDatabaseTabs(selectedDatabase, (list) =>
+        list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: false, error: String(e), result: null } : t))
+      );
       setError(String(e));
     }
   };
@@ -1596,19 +1628,37 @@ function StudioView({ groupId }: { groupId: string }) {
                 />
                 <section className="flex min-h-[200px] flex-1 flex-col gap-2 overflow-hidden border-t border-slate-200 bg-slate-50/40 p-3">
                   {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
+                  {(activeTab?.sqlResultLoading ?? false) && !activeTabResult ? (
+                    <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-2 rounded-tf border border-dashed border-slate-200 bg-white/60">
+                      <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                      <span className="text-[11px] text-slate-500">正在执行 SQL…</span>
+                    </div>
+                  ) : null}
                   {activeTabResult && (
                     <>
                       {activeTabResult.execLog && activeTabResult.execLog.length > 0 ? (
-                        <>
+                        <div className="relative min-h-0 flex-1">
+                          {(activeTab?.sqlResultLoading ?? false) && (
+                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-tf bg-white/80 backdrop-blur-[1px]">
+                              <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                              <span className="text-[11px] text-slate-500">正在执行 SQL…</span>
+                            </div>
+                          )}
                           <p className="shrink-0 text-xs text-slate-600">
                             {activeTabResult.message}（{activeTabResult.durationMs}ms）
                           </p>
                           <pre className="max-h-[min(320px,50vh)] min-h-0 flex-1 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
                             {activeTabResult.execLog.join("\n")}
                           </pre>
-                        </>
+                        </div>
                       ) : activeTabResult.rows && activeTabResult.rows.length > 0 ? (
-                        <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
+                        <div className="result-content relative min-h-0 min-w-0 flex-1 overflow-hidden">
+                          {(activeTab?.sqlResultLoading ?? false) && (
+                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-tf bg-white/80 backdrop-blur-[1px]">
+                              <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                              <span className="text-[11px] text-slate-500">正在执行 SQL…</span>
+                            </div>
+                          )}
                           <VirtualResultGrid
                             columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
                             columnTypes={activeTabResult.columnTypes}
@@ -1618,9 +1668,17 @@ function StudioView({ groupId }: { groupId: string }) {
                           />
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-600">
-                          {activeTabResult.message}（{activeTabResult.durationMs}ms）
-                        </p>
+                        <div className="relative min-h-0 flex-1">
+                          {(activeTab?.sqlResultLoading ?? false) && (
+                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-tf bg-white/80 backdrop-blur-[1px]">
+                              <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                              <span className="text-[11px] text-slate-500">正在执行 SQL…</span>
+                            </div>
+                          )}
+                          <p className="text-xs text-slate-600">
+                            {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                          </p>
+                        </div>
                       )}
                     </>
                   )}
@@ -1640,77 +1698,139 @@ function StudioView({ groupId }: { groupId: string }) {
                       <span className="text-slate-400"> · {activeTab.contextDb}</span>
                     ) : null}
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
                     {activeTab.tableTotal != null &&
                       activeTab.tablePageLimit != null &&
                       activeTab.tableTotal > activeTab.tablePageLimit && (
                         <>
-                          <button
-                            type="button"
-                            className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={(activeTab.tableOffset ?? 0) <= 0}
-                            onClick={() => {
-                              if (!activeTab.contextTable) return;
-                              const lim = activeTab.tablePageLimit ?? 5000;
-                              void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
-                                offset: Math.max(0, (activeTab.tableOffset ?? 0) - lim),
-                                orderBy: activeTab.tableSortColumn ?? "",
-                                orderDesc: activeTab.tableSortDesc ?? false,
-                              });
-                            }}
-                          >
-                            上一页
-                          </button>
-                          <span className="text-[11px] tabular-nums text-slate-500">
-                            {Math.floor((activeTab.tableOffset ?? 0) / (activeTab.tablePageLimit || 1)) + 1} /{" "}
-                            {Math.max(1, Math.ceil(activeTab.tableTotal / (activeTab.tablePageLimit || 1)))} 页 · 每页{" "}
-                            {activeTab.tablePageLimit} · 共 {activeTab.tableTotal} 行
-                          </span>
-                          <button
-                            type="button"
-                            className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={(activeTab.tableOffset ?? 0) + (activeTab.tablePageLimit ?? 0) >= activeTab.tableTotal}
-                            onClick={() => {
-                              if (!activeTab.contextTable) return;
-                              const lim = activeTab.tablePageLimit ?? 5000;
-                              void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
-                                offset: (activeTab.tableOffset ?? 0) + lim,
-                                orderBy: activeTab.tableSortColumn ?? "",
-                                orderDesc: activeTab.tableSortDesc ?? false,
-                              });
-                            }}
-                          >
-                            下一页
-                          </button>
+                          {(() => {
+                            const tBusy = activeTab.tableQueryLoading ?? false;
+                            const off = activeTab.tableOffset ?? 0;
+                            const lim = activeTab.tablePageLimit ?? 5000;
+                            const total = activeTab.tableTotal ?? 0;
+                            const prevDisabled = off <= 0 || tBusy;
+                            const nextDisabled = tBusy || off + lim >= total;
+                            return (
+                              <>
+                                <button
+                                  type="button"
+                                  aria-label="上一页"
+                                  aria-disabled={prevDisabled}
+                                  title={tBusy ? "加载中…" : off <= 0 ? "已是第一页" : "上一页"}
+                                  onClick={() => {
+                                    if (prevDisabled || !activeTab.contextTable) return;
+                                    void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                      offset: Math.max(0, off - lim),
+                                      orderBy: activeTab.tableSortColumn ?? "",
+                                      orderDesc: activeTab.tableSortDesc ?? false,
+                                    });
+                                  }}
+                                  className={`group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                                    prevDisabled
+                                      ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
+                                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  <ChevronLeft
+                                    className={`h-2.5 w-2.5 ${prevDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
+                                    strokeWidth={2.5}
+                                  />
+                                  {prevDisabled ? (
+                                    <Ban
+                                      className="pointer-events-none absolute h-2 w-2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
+                                      strokeWidth={2}
+                                      aria-hidden
+                                    />
+                                  ) : null}
+                                </button>
+                                <span className="text-[10px] tabular-nums text-slate-500">
+                                  {Math.floor(off / (lim || 1)) + 1} / {Math.max(1, Math.ceil(total / (lim || 1)))} · {lim}/
+                                  {total}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label="下一页"
+                                  aria-disabled={nextDisabled}
+                                  title={tBusy ? "加载中…" : off + lim >= total ? "已是最后一页" : "下一页"}
+                                  onClick={() => {
+                                    if (nextDisabled || !activeTab.contextTable) return;
+                                    void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                      offset: off + lim,
+                                      orderBy: activeTab.tableSortColumn ?? "",
+                                      orderDesc: activeTab.tableSortDesc ?? false,
+                                    });
+                                  }}
+                                  className={`group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                                    nextDisabled
+                                      ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
+                                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  <ChevronRight
+                                    className={`h-2.5 w-2.5 ${nextDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
+                                    strokeWidth={2.5}
+                                  />
+                                  {nextDisabled ? (
+                                    <Ban
+                                      className="pointer-events-none absolute h-2 w-2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
+                                      strokeWidth={2}
+                                      aria-hidden
+                                    />
+                                  ) : null}
+                                </button>
+                              </>
+                            );
+                          })()}
                         </>
                       )}
                     <button
                       type="button"
-                      className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                      title="重新加载当前页"
-                      disabled={!activeTab.contextTable}
+                      aria-label="刷新当前页"
+                      title="刷新"
+                      disabled={!activeTab.contextTable || (activeTab.tableQueryLoading ?? false)}
+                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
                       onClick={() => refreshActiveTableTab()}
                     >
-                      <RefreshCw className="h-3 w-3" strokeWidth={2} />
-                      刷新
+                      <RefreshCw
+                        className={`h-2.5 w-2.5 ${activeTab.tableQueryLoading ? "animate-spin" : ""}`}
+                        strokeWidth={2}
+                      />
                     </button>
                   </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
                   {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
+                  {(activeTab.tableQueryLoading ?? false) && !activeTabResult ? (
+                    <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-2 rounded-tf border border-dashed border-slate-200 bg-white/60">
+                      <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                      <span className="text-[11px] text-slate-500">加载表数据…</span>
+                    </div>
+                  ) : null}
                   {activeTabResult && (
                     <>
                       {activeTabResult.execLog && activeTabResult.execLog.length > 0 ? (
-                        <>
+                        <div className="relative min-h-0 flex-1">
+                          {(activeTab.tableQueryLoading ?? false) && (
+                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-tf bg-white/80 backdrop-blur-[1px]">
+                              <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                              <span className="text-[11px] text-slate-500">加载表数据…</span>
+                            </div>
+                          )}
                           <p className="shrink-0 text-xs text-slate-600">
                             {activeTabResult.message}（{activeTabResult.durationMs}ms）
                           </p>
                           <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
                             {activeTabResult.execLog.join("\n")}
                           </pre>
-                        </>
+                        </div>
                       ) : activeTabResult.columns && activeTabResult.columns.length > 0 ? (
-                        <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
+                        <div className="result-content relative min-h-0 min-w-0 flex-1 overflow-hidden">
+                          {(activeTab.tableQueryLoading ?? false) && (
+                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-tf bg-white/80 backdrop-blur-[1px]">
+                              <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                              <span className="text-[11px] text-slate-500">加载表数据…</span>
+                            </div>
+                          )}
                           <VirtualResultGrid
                             columns={activeTabResult.columns}
                             columnTypes={activeTabResult.columnTypes}
@@ -1734,9 +1854,17 @@ function StudioView({ groupId }: { groupId: string }) {
                           />
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-600">
-                          {activeTabResult.message}（{activeTabResult.durationMs}ms）
-                        </p>
+                        <div className="relative min-h-0 flex-1">
+                          {(activeTab.tableQueryLoading ?? false) && (
+                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-tf bg-white/80 backdrop-blur-[1px]">
+                              <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
+                              <span className="text-[11px] text-slate-500">加载表数据…</span>
+                            </div>
+                          )}
+                          <p className="text-xs text-slate-600">
+                            {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                          </p>
+                        </div>
                       )}
                     </>
                   )}
