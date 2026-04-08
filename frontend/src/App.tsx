@@ -1282,7 +1282,7 @@ function StudioView({ groupId }: { groupId: string }) {
             </button>
           </div>
 
-          <div className="tf-studio-object-tree min-h-0 flex-1 overflow-auto px-0.5 py-1">
+          <div className="tf-studio-object-tree min-h-0 flex-1 overflow-auto py-1 pl-0 pr-1">
             {/*<div className="px-2 pb-1 text-[11px] font-semibold text-slate-500">对象树</div>*/}
             <div className="space-y-0">
               {filteredTree.map((db) => {
@@ -1292,7 +1292,7 @@ function StudioView({ groupId }: { groupId: string }) {
                   <div key={db.name} className="rounded-sm border border-transparent">
                     <button
                       type="button"
-                      className={`flex w-full items-center gap-0.5 rounded-sm px-0.5 py-px text-left ${
+                      className={`flex w-full items-center gap-0.5 rounded-sm py-px pl-0 pr-0.5 text-left ${
                         selectedDatabase === db.name
                           ? "bg-slate-100 ring-1 ring-slate-200/90"
                           : "hover:bg-slate-50/90"
@@ -1300,16 +1300,16 @@ function StudioView({ groupId }: { groupId: string }) {
                       onClick={() => void toggleDatabaseExpand(db.name)}
                       title={expanded ? "收起表列表" : "展开表列表"}
                     >
-                      <span className="w-4 shrink-0 select-none text-[10px] leading-none text-slate-400">
+                      <span className="w-3.5 shrink-0 select-none text-[10px] leading-none text-slate-400">
                         {expanded ? "▾" : "▸"}
                       </span>
-                      <Database className="h-3 w-3 shrink-0 text-slate-500" strokeWidth={2} aria-hidden />
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-slate-800">
+                      <Database className="h-3.5 w-3.5 shrink-0 text-slate-500" strokeWidth={2} aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12px] font-medium text-slate-800">
                         {db.name}
                       </span>
                     </button>
                     {expanded && (
-                      <div className="ml-2 border-l border-slate-200/80 pl-1.5 pt-px">
+                      <div className="ml-4 border-l border-slate-200/80 pl-3.5 pt-0.5">
                         {db.visibleTables.length === 0 && (
                           <div className="py-px pl-0.5 text-[10px] text-slate-400">
                             {filterQ && db.loaded && db.tables.length > 0 ? "无匹配" : "暂无表"}
