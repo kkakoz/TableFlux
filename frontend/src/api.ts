@@ -48,6 +48,7 @@ export const api = {
   testConnection: (connectionId: string) => WorkspaceService.TestConnection(connectionId),
 
   openGroupWindow: (groupId: string) => StudioWindowService.OpenGroupWindow(groupId),
+  focusMainWindow: () => StudioWindowService.FocusMainWindow(),
 
   executeSQL: (req: ExecuteSQLRequest | Record<string, unknown>) => DatabaseService.ExecuteSQL(req as any),
   queryTablePage: (req: TableQueryRequest | Record<string, unknown>) =>

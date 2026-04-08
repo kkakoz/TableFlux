@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"fmt"
@@ -45,4 +45,17 @@ func (s *StudioWindowService) OpenGroupWindow(groupID string) error {
 		URL:              "/?studio=1&groupId=" + groupID,
 	})
 	return nil
+}
+
+// FocusMainWindow 聚焦连接管理主窗口（名称为 main）。
+func (s *StudioWindowService) FocusMainWindow() error {
+	app := application.Get()
+	if app == nil {
+		return fmt.Errorf("app is not initialized")
+	}
+	if w, ok := app.Window.GetByName("main"); ok {
+		w.Focus()
+		return nil
+	}
+	return fmt.Errorf("main window not found")
 }

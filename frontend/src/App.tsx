@@ -13,7 +13,19 @@ import {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { editor as MonacoEditorNS, IDisposable, IRange, languages } from "monaco-editor";
-import { Database, History, Menu, Play, RefreshCw, Settings2, SquareCode, Table2, X } from "lucide-react";
+import {
+  ChevronRight,
+  Database,
+  History,
+  House,
+  Menu,
+  Play,
+  RefreshCw,
+  Settings2,
+  SquareCode,
+  Table2,
+  X,
+} from "lucide-react";
 import { api } from "./api";
 import type {
   ConnectionMeta,
@@ -185,21 +197,21 @@ const gridTheme: Theme = {
   horizontalBorderColor: "#e2e8f0",
   accentColor: "#2563eb",
   accentLight: "rgba(37, 99, 235, 0.12)",
-  baseFontStyle: "11px",
-  headerFontStyle: "600 11px",
-  editorFontSize: "11px",
-  markerFontStyle: "9px",
-  lineHeight: 1.35,
+  baseFontStyle: "12px",
+  headerFontStyle: "600 12px",
+  editorFontSize: "12px",
+  markerFontStyle: "10px",
+  lineHeight: 1.4,
   cellVerticalPadding: 2,
   cellHorizontalPadding: 6,
-  headerIconSize: 14,
+  headerIconSize: 15,
 };
 
-const GRID_ROW_HEIGHT = 26;
-const GRID_HEADER_HEIGHT = 28;
+const GRID_ROW_HEIGHT = 28;
+const GRID_HEADER_HEIGHT = 30;
 /** 结果表 NULL 占位（与 slate-400 接近，区别于正文） */
 const GRID_NULL_TEXT = "#94a3b8";
-const ROW_MARKER_WIDTH = 40;
+const ROW_MARKER_WIDTH = 42;
 
 function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -224,6 +236,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const [sidebarWidth, setSidebarWidth] = useState(272);
   const [editorHeight, setEditorHeight] = useState(340);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [workbenchSubmenuOpen, setWorkbenchSubmenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRev, setHistoryRev] = useState(0);
@@ -392,6 +405,7 @@ function StudioView({ groupId }: { groupId: string }) {
 
   const activeConnMeta = connections.find((c) => c.id === activeConnectionId);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
+  const otherWorkbenches = useMemo(() => allGroups.filter((g) => g.id !== groupId), [allGroups, groupId]);
   const allDbNames = useMemo(() => dbTree.map((d) => d.name), [dbTree]);
   const visibilitySetForModal = visibleDbSet ?? new Set(allDbNames);
   const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);
@@ -598,7 +612,10 @@ function StudioView({ groupId }: { groupId: string }) {
   }, []);
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen) {
+      setWorkbenchSubmenuOpen(false);
+      return;
+    }
     const onMouseDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
@@ -771,6 +788,15 @@ function StudioView({ groupId }: { groupId: string }) {
       list.map((t) => (t.id === activeTab.id ? { ...t, sql, connectionId: activeConnectionId, contextDb: selectedDatabase } : t))
     );
   };
+
+  const refreshActiveTableTab = useCallback(() => {
+    if (!activeTab || activeTab.type !== "table" || !activeTab.contextTable) return;
+    void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+      offset: activeTab.tableOffset ?? 0,
+      orderBy: activeTab.tableSortColumn ?? "",
+      orderDesc: activeTab.tableSortDesc ?? false,
+    });
+  }, [activeTab, runTablePageQuery]);
 
   const appendSelectSQL = (dbName: string, tableName: string) => {
     if (!activeConnectionId) return;
@@ -1246,29 +1272,76 @@ function StudioView({ groupId }: { groupId: string }) {
                 <Menu className="h-4 w-4" strokeWidth={2} />
               </button>
               {menuOpen && (
-                <div className="absolute left-0 z-40 mt-1 w-44 overflow-hidden rounded-tf border border-slate-200 bg-white py-1 text-xs shadow-lg">
-                    <button
-                      type="button"
-                      className="block w-full px-3 py-2 text-left hover:bg-slate-50"
-                      onClick={() => {
-                        setHistoryOpen(true);
-                        setMenuOpen(false);
-                      }}
-                    >
-                      历史执行 SQL
-                    </button>
-                    <button
-                      type="button"
-                      className="block w-full px-3 py-2 text-left hover:bg-slate-50"
-                      onClick={() => {
-                        setMigrationOpen(true);
-                        setMenuOpen(false);
-                      }}
-                    >
-                      数据迁移
-                    </button>
+                <div className="absolute left-0 z-40 mt-1 w-48 overflow-visible rounded-tf border border-slate-200 bg-white py-1 text-xs shadow-lg">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void api.focusMainWindow().catch(() => {
+                        window.location.assign(`${window.location.pathname || "/"}`);
+                      });
+                    }}
+                  >
+                    <House className="h-3.5 w-3.5 shrink-0 text-slate-500" strokeWidth={2} />
+                    打开主页（连接管理）
+                  </button>
+                  <div
+                    className="relative"
+                    onMouseEnter={() => setWorkbenchSubmenuOpen(true)}
+                    onMouseLeave={() => setWorkbenchSubmenuOpen(false)}
+                  >
+                    <div className="flex w-full cursor-default items-center justify-between gap-2 px-3 py-2 hover:bg-slate-50">
+                      <span className="text-left">打开其它工作台</span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} />
+                    </div>
+                    {workbenchSubmenuOpen && (
+                      <div className="absolute left-full top-0 z-50 pl-0.5">
+                        <div className="min-w-[10rem] max-w-[min(240px,70vw)] rounded-tf border border-slate-200 bg-white py-1 shadow-lg">
+                          {otherWorkbenches.length === 0 ? (
+                            <div className="px-3 py-2 text-[11px] text-slate-400">暂无其它分组</div>
+                          ) : (
+                            otherWorkbenches.map((g) => (
+                              <button
+                                key={g.id}
+                                type="button"
+                                className="block w-full truncate px-3 py-2 text-left hover:bg-slate-50"
+                                title={g.name}
+                                onClick={() => {
+                                  setMenuOpen(false);
+                                  void api.openGroupWindow(g.id).catch((err) => setError(String(err)));
+                                }}
+                              >
+                                {g.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left hover:bg-slate-50"
+                    onClick={() => {
+                      setHistoryOpen(true);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    历史执行 SQL
+                  </button>
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left hover:bg-slate-50"
+                    onClick={() => {
+                      setMigrationOpen(true);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    数据迁移
+                  </button>
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -1319,9 +1392,9 @@ function StudioView({ groupId }: { groupId: string }) {
                           <button
                             key={`${db.name}.${tableName}`}
                             type="button"
-                            title={tableName}
+                            title={`${tableName} · 双击打开`}
                             className="mb-px flex w-full min-w-0 items-center gap-1 rounded-sm py-px pl-0.5 pr-1 text-left font-mono text-[10px] font-normal text-slate-700 hover:bg-slate-50"
-                            onClick={() => appendSelectSQL(db.name, tableName)}
+                            onDoubleClick={() => appendSelectSQL(db.name, tableName)}
                           >
                             <Table2 className="h-2.5 w-2.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
                             <span className="min-w-0 flex-1 truncate">{tableName}</span>
@@ -1556,21 +1629,87 @@ function StudioView({ groupId }: { groupId: string }) {
             )}
 
             {activeTab?.type === "table" && (
-              <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
-                {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
-                {activeTabResult && (
-                  <>
-                    {activeTabResult.execLog && activeTabResult.execLog.length > 0 ? (
-                      <>
-                        <p className="shrink-0 text-xs text-slate-600">
-                          {activeTabResult.message}（{activeTabResult.durationMs}ms）
-                        </p>
-                        <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
-                          {activeTabResult.execLog.join("\n")}
-                        </pre>
-                      </>
-                    ) : activeTabResult.columns && activeTabResult.columns.length > 0 ? (
-                      <>
+              <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
+                  <div className="min-w-0 pt-0.5 font-mono text-[11px] text-slate-600">
+                    <span className="text-slate-400">表</span>{" "}
+                    <span className="font-medium text-slate-800" title={activeTab.contextTable}>
+                      {activeTab.contextTable}
+                    </span>
+                    {activeTab.contextDb ? (
+                      <span className="text-slate-400"> · {activeTab.contextDb}</span>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    {activeTab.tableTotal != null &&
+                      activeTab.tablePageLimit != null &&
+                      activeTab.tableTotal > activeTab.tablePageLimit && (
+                        <>
+                          <button
+                            type="button"
+                            className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={(activeTab.tableOffset ?? 0) <= 0}
+                            onClick={() => {
+                              if (!activeTab.contextTable) return;
+                              const lim = activeTab.tablePageLimit ?? 5000;
+                              void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                offset: Math.max(0, (activeTab.tableOffset ?? 0) - lim),
+                                orderBy: activeTab.tableSortColumn ?? "",
+                                orderDesc: activeTab.tableSortDesc ?? false,
+                              });
+                            }}
+                          >
+                            上一页
+                          </button>
+                          <span className="text-[11px] tabular-nums text-slate-500">
+                            {Math.floor((activeTab.tableOffset ?? 0) / (activeTab.tablePageLimit || 1)) + 1} /{" "}
+                            {Math.max(1, Math.ceil(activeTab.tableTotal / (activeTab.tablePageLimit || 1)))} 页 · 每页{" "}
+                            {activeTab.tablePageLimit} · 共 {activeTab.tableTotal} 行
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={(activeTab.tableOffset ?? 0) + (activeTab.tablePageLimit ?? 0) >= activeTab.tableTotal}
+                            onClick={() => {
+                              if (!activeTab.contextTable) return;
+                              const lim = activeTab.tablePageLimit ?? 5000;
+                              void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                offset: (activeTab.tableOffset ?? 0) + lim,
+                                orderBy: activeTab.tableSortColumn ?? "",
+                                orderDesc: activeTab.tableSortDesc ?? false,
+                              });
+                            }}
+                          >
+                            下一页
+                          </button>
+                        </>
+                      )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      title="重新加载当前页"
+                      disabled={!activeTab.contextTable}
+                      onClick={() => refreshActiveTableTab()}
+                    >
+                      <RefreshCw className="h-3 w-3" strokeWidth={2} />
+                      刷新
+                    </button>
+                  </div>
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+                  {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
+                  {activeTabResult && (
+                    <>
+                      {activeTabResult.execLog && activeTabResult.execLog.length > 0 ? (
+                        <>
+                          <p className="shrink-0 text-xs text-slate-600">
+                            {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                          </p>
+                          <pre className="max-h-32 overflow-auto rounded-tf border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
+                            {activeTabResult.execLog.join("\n")}
+                          </pre>
+                        </>
+                      ) : activeTabResult.columns && activeTabResult.columns.length > 0 ? (
                         <div className="result-content min-h-0 min-w-0 flex-1 overflow-hidden">
                           <VirtualResultGrid
                             columns={activeTabResult.columns}
@@ -1594,57 +1733,14 @@ function StudioView({ groupId }: { groupId: string }) {
                             onCopyError={(msg) => setError(msg)}
                           />
                         </div>
-                        {activeTab.tableTotal != null &&
-                          activeTab.tablePageLimit != null &&
-                          activeTab.tableTotal > activeTab.tablePageLimit && (
-                            <div className="flex shrink-0 flex-wrap items-center gap-2 text-[11px] text-slate-600">
-                              <button
-                                type="button"
-                                className="btn ghost"
-                                disabled={(activeTab.tableOffset ?? 0) <= 0}
-                                onClick={() => {
-                                  if (!activeTab.contextTable) return;
-                                  const lim = activeTab.tablePageLimit ?? 5000;
-                                  void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
-                                    offset: Math.max(0, (activeTab.tableOffset ?? 0) - lim),
-                                    orderBy: activeTab.tableSortColumn ?? "",
-                                    orderDesc: activeTab.tableSortDesc ?? false,
-                                  });
-                                }}
-                              >
-                                上一页
-                              </button>
-                              <span>
-                                第 {Math.floor((activeTab.tableOffset ?? 0) / (activeTab.tablePageLimit || 1)) + 1} /{" "}
-                                {Math.max(1, Math.ceil(activeTab.tableTotal / (activeTab.tablePageLimit || 1)))} 页（每页{" "}
-                                {activeTab.tablePageLimit} 条，共 {activeTab.tableTotal} 行）
-                              </span>
-                              <button
-                                type="button"
-                                className="btn ghost"
-                                disabled={(activeTab.tableOffset ?? 0) + (activeTab.tablePageLimit ?? 0) >= activeTab.tableTotal}
-                                onClick={() => {
-                                  if (!activeTab.contextTable) return;
-                                  const lim = activeTab.tablePageLimit ?? 5000;
-                                  void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
-                                    offset: (activeTab.tableOffset ?? 0) + lim,
-                                    orderBy: activeTab.tableSortColumn ?? "",
-                                    orderDesc: activeTab.tableSortDesc ?? false,
-                                  });
-                                }}
-                              >
-                                下一页
-                              </button>
-                            </div>
-                          )}
-                      </>
-                    ) : (
-                      <p className="text-xs text-slate-600">
-                        {activeTabResult.message}（{activeTabResult.durationMs}ms）
-                      </p>
-                    )}
-                  </>
-                )}
+                      ) : (
+                        <p className="text-xs text-slate-600">
+                          {activeTabResult.message}（{activeTabResult.durationMs}ms）
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
               </section>
             )}
           </section>
