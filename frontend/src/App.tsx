@@ -1725,19 +1725,19 @@ function StudioView({ groupId }: { groupId: string }) {
                                       orderDesc: activeTab.tableSortDesc ?? false,
                                     });
                                   }}
-                                  className={`group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                                  className={`group relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border ${
                                     prevDisabled
                                       ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
                                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                                   }`}
                                 >
                                   <ChevronLeft
-                                    className={`h-2.5 w-2.5 ${prevDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
+                                    className={`h-3.5 w-3.5 ${prevDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
                                     strokeWidth={2.5}
                                   />
                                   {prevDisabled ? (
                                     <Ban
-                                      className="pointer-events-none absolute h-2 w-2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
+                                      className="pointer-events-none absolute h-2.5 w-2.5 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
                                       strokeWidth={2}
                                       aria-hidden
                                     />
@@ -1760,19 +1760,19 @@ function StudioView({ groupId }: { groupId: string }) {
                                       orderDesc: activeTab.tableSortDesc ?? false,
                                     });
                                   }}
-                                  className={`group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                                  className={`group relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border ${
                                     nextDisabled
                                       ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
                                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                                   }`}
                                 >
                                   <ChevronRight
-                                    className={`h-2.5 w-2.5 ${nextDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
+                                    className={`h-3.5 w-3.5 ${nextDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
                                     strokeWidth={2.5}
                                   />
                                   {nextDisabled ? (
                                     <Ban
-                                      className="pointer-events-none absolute h-2 w-2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
+                                      className="pointer-events-none absolute h-2.5 w-2.5 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
                                       strokeWidth={2}
                                       aria-hidden
                                     />
@@ -1788,11 +1788,11 @@ function StudioView({ groupId }: { groupId: string }) {
                       aria-label="刷新当前页"
                       title="刷新"
                       disabled={!activeTab.contextTable || (activeTab.tableQueryLoading ?? false)}
-                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
                       onClick={() => refreshActiveTableTab()}
                     >
                       <RefreshCw
-                        className={`h-2.5 w-2.5 ${activeTab.tableQueryLoading ? "animate-spin" : ""}`}
+                        className={`h-3.5 w-3.5 ${activeTab.tableQueryLoading ? "animate-spin" : ""}`}
                         strokeWidth={2}
                       />
                     </button>
