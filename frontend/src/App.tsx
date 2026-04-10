@@ -1293,10 +1293,10 @@ function StudioView({ groupId }: { groupId: string }) {
           className="flex min-h-0 w-[var(--sw)] shrink-0 flex-col border-r border-slate-200 bg-white"
           style={{ ["--sw" as string]: `${sidebarWidth}px`, width: sidebarWidth }}
         >
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
             <div ref={menuRef} className="relative shrink-0">
               <button
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-600 hover:bg-slate-100"
+                className="tf-btn-icon"
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
                 title="菜单"
@@ -1377,7 +1377,7 @@ function StudioView({ groupId }: { groupId: string }) {
             </div>
             <button
               type="button"
-              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              className="tf-btn-toolbar shrink-0 gap-1 text-[11px] font-medium shadow-sm"
               title="管理左侧展示的数据库"
               onClick={() => setDbVisibilityOpen(true)}
               disabled={!activeConnectionId}
@@ -1405,18 +1405,18 @@ function StudioView({ groupId }: { groupId: string }) {
                       onClick={() => void toggleDatabaseExpand(db.name)}
                       title={expanded ? "收起表列表" : "展开表列表"}
                     >
-                      <span className="w-3.5 shrink-0 select-none text-[10px] leading-none text-slate-400">
+                      <span className="w-3.5 shrink-0 select-none text-[13px] leading-none text-slate-400">
                         {expanded ? "▾" : "▸"}
                       </span>
-                      <Database className="h-3.5 w-3.5 shrink-0 text-slate-500" strokeWidth={2} aria-hidden />
-                      <span className="min-w-0 flex-1 truncate font-mono text-[12px] font-medium text-slate-800">
+                      <Database className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={2} aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-mono text-base font-medium text-slate-800">
                         {db.name}
                       </span>
                     </button>
                     {expanded && (
                       <div className="ml-4 border-l border-slate-200/80 pl-3.5 pt-0.5">
                         {db.visibleTables.length === 0 && (
-                          <div className="py-px pl-0.5 text-[10px] text-slate-400">
+                          <div className="py-px pl-0.5 text-[13px] text-slate-400">
                             {filterQ && db.loaded && db.tables.length > 0 ? "无匹配" : "暂无表"}
                           </div>
                         )}
@@ -1425,7 +1425,7 @@ function StudioView({ groupId }: { groupId: string }) {
                             key={`${db.name}.${tableName}`}
                             type="button"
                             title={`${tableName} · 双击打开`}
-                            className="mb-px flex w-full min-w-0 items-center gap-1 rounded-sm py-px pl-0.5 pr-1 text-left font-mono text-[10px] font-normal text-slate-700 hover:bg-slate-50"
+                            className="mb-px flex w-full min-w-0 items-center gap-1 rounded-sm py-px pl-0.5 pr-1 text-left font-mono text-[12px] font-normal text-slate-700 hover:bg-slate-50"
                             onDoubleClick={() => appendSelectSQL(db.name, tableName)}
                           >
                             <Table2 className="h-2.5 w-2.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
@@ -1439,9 +1439,9 @@ function StudioView({ groupId }: { groupId: string }) {
               })}
             </div>
           </div>
-          <div className="shrink-0 border-t border-slate-200 px-1.5 py-1.5">
+          <div className="shrink-0 border-t border-slate-200 px-1.5 py-1">
             <input
-              className="h-6 w-full rounded border border-slate-200 bg-slate-50 px-1.5 text-[11px] leading-tight text-slate-800 outline-none ring-blue-500/30 focus:border-blue-300 focus:ring-2"
+              className="h-5 w-full rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[9px] leading-tight text-slate-800 outline-none ring-blue-500/30 focus:border-blue-300 focus:ring-2 placeholder:text-slate-400"
               value={tableFilter}
               onChange={(e) => setTableFilter(e.target.value)}
               placeholder="搜索表（仅已展开的库）"
@@ -1457,7 +1457,7 @@ function StudioView({ groupId }: { groupId: string }) {
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-slate-100">
           <section className="flex min-h-0 flex-1 flex-col border-l border-slate-200 bg-white shadow-sm">
-            <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
+            <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-1.5">
               <span
                 className="min-w-0 max-w-[min(240px,40vw)] shrink truncate text-base font-semibold text-slate-800"
                 title={currentGroupName}
@@ -1473,7 +1473,7 @@ function StudioView({ groupId }: { groupId: string }) {
                 {activeConnectionId ? (activeConnMeta ? `${activeConnMeta.driver.toUpperCase()} · 就绪` : "已连接") : "未连接"}
               </span>
               <select
-                className="max-w-[140px] rounded-tf border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] leading-tight text-slate-700"
+                className="tf-control tf-control-sm max-w-[140px] text-slate-700"
                 value={activeConnectionId}
                 onChange={(e) => setActiveConnectionId(e.target.value)}
                 aria-label="数据库连接"
@@ -1485,15 +1485,15 @@ function StudioView({ groupId }: { groupId: string }) {
                   </option>
                 ))}
               </select>
-              <span className="max-w-[200px] truncate text-xs text-slate-600" title={selectedDatabase || undefined}>
+              <span className="max-w-[200px] truncate text-[15px] text-slate-600" title={selectedDatabase || undefined}>
                 {activeConnMeta ? `${activeConnMeta.name} (${activeConnMeta.driver})` : "未选连接"}
               </span>
-              <span className="max-w-[160px] truncate text-xs text-slate-500" title={selectedDatabase || undefined}>
+              <span className="max-w-[160px] truncate text-[15px] text-slate-500" title={selectedDatabase || undefined}>
                 {selectedDatabase ? `当前库 · ${selectedDatabase}` : "未选库"}
               </span>
               <button
                 type="button"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                className="tf-btn-icon tf-btn-icon-bordered"
                 onClick={() => void reloadDbTree()}
                 disabled={!activeConnectionId}
                 title="刷新对象树"
@@ -1504,7 +1504,7 @@ function StudioView({ groupId }: { groupId: string }) {
                 <span className="hidden text-[11px] text-slate-400 lg:inline">Ctrl+L AI · Ctrl+R 执行当前语句</span>
                 <button
                   type="button"
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-transparent text-emerald-600 hover:bg-transparent hover:text-emerald-600 disabled:cursor-not-allowed disabled:text-slate-300"
+                  className="tf-btn-icon tf-btn-toolbar-play"
                   onClick={() => void runUnifiedSQL()}
                   disabled={!activeConnectionId || activeTab?.type !== "sql"}
                   title="执行选中或全文；多条语句时仅显示执行摘要 (与批量一致)"
@@ -1513,22 +1513,18 @@ function StudioView({ groupId }: { groupId: string }) {
                 </button>
                 <button
                   type="button"
-                  className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="tf-btn-toolbar"
                   onClick={() => void explain()}
                   title="EXPLAIN 选中或全文（与工具栏执行一致）"
                 >
                   计划
                 </button>
-                <button
-                  type="button"
-                  className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50"
-                  onClick={addTab}
-                >
+                <button type="button" className="tf-btn-toolbar" onClick={addTab}>
                   新标签
                 </button>
                 <button
                   type="button"
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="tf-btn-toolbar gap-1"
                   onClick={() => setHistoryOpen(true)}
                   title="历史执行 SQL"
                 >
@@ -1537,7 +1533,7 @@ function StudioView({ groupId }: { groupId: string }) {
                 </button>
                 <button
                   type="button"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  className="tf-btn-icon tf-btn-icon-bordered"
                   title="设置"
                   onClick={() => setSettingsOpen(true)}
                 >
@@ -1546,7 +1542,7 @@ function StudioView({ groupId }: { groupId: string }) {
               </div>
             </header>
 
-            <div className="tf-studio-tab-strip flex h-7 shrink-0 items-stretch gap-px overflow-x-auto border-b border-slate-200 bg-slate-100/90 px-0.5">
+            <div className="tf-studio-tab-strip flex h-9 shrink-0 items-stretch gap-px overflow-x-auto border-b border-slate-200 bg-slate-100/90 px-0.5">
               {visibleTabs.map((t) => {
                 const isActive = t.id === activeTab?.id;
                 return (
@@ -1554,7 +1550,7 @@ function StudioView({ groupId }: { groupId: string }) {
                     key={t.id}
                     type="button"
                     title={t.title}
-                    className={`group/tab inline-flex h-6 min-w-0 max-w-[min(220px,32vw)] items-center gap-0.5 rounded-sm border px-1 text-left text-[11px] leading-none ${
+                    className={`group/tab inline-flex h-8 min-w-0 max-w-[min(220px,32vw)] items-center gap-0.5 rounded-sm border px-1 text-left text-[13px] leading-none ${
                       isActive
                         ? "border-slate-200/90 bg-white font-medium text-slate-900 shadow-sm"
                         : "border-transparent bg-transparent font-normal text-slate-500 hover:bg-slate-200/40 hover:text-slate-700"
@@ -1689,7 +1685,7 @@ function StudioView({ groupId }: { groupId: string }) {
             {activeTab?.type === "table" && (
               <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <div className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
-                  <div className="min-w-0 pt-0.5 font-mono text-[11px] text-slate-600">
+                  <div className="min-w-0 pt-0.5 font-mono text-[13px] text-slate-600">
                     <span className="text-slate-400">表</span>{" "}
                     <span className="font-medium text-slate-800" title={activeTab.contextTable}>
                       {activeTab.contextTable}

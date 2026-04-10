@@ -1,0 +1,31 @@
+---
+description: TableFlux 前端紧凑 UI — CSS 变量与工具类约定
+globs: frontend/**/*
+alwaysApply: false
+---
+
+# 前端紧凑 UI
+
+## 尺寸令牌（单一数据源）
+
+在 `frontend/src/styles/themes.css` 的 `:root` 中维护 `--tf-*` 变量（如 `--tf-touch-min`、`--tf-icon-btn-size`、`--tf-btn-min-h`、`--tf-input-min-h` 等）。调整全局密度时**优先改此处**，再在 `frontend/src/index.css` 或 `frontend/public/style.css` 中核对引用。
+
+- 不要在各组件里重复写死 `28px` / `32px` / `36px` 混用；新代码应使用 `var(--tf-…)` 或已有工具类。
+- `public/style.css` 中的表单与 `.btn` 已用 `var(--tf-*, fallback)`；修改令牌时保持 fallback 合理。
+
+## Studio / Tailwind 区域
+
+- 图标按钮、工具栏文字按钮：使用 `index.css` 中的 `.tf-btn-icon`、`.tf-btn-icon-bordered`、`.tf-btn-toolbar`、`.tf-btn-toolbar-play`，避免再堆一长串 `h-8` + `rounded-md` + `border`。
+- 主操作（蓝底）：`.tf-btn-primary`；次要描边：`.tf-btn-toolbar`。
+- 表单 `input` / `select`：`.tf-control`；与 Studio 顶栏同高的下拉：叠加 `.tf-control-sm`（如「选择连接」）。
+- 需要行内微调时，可叠加 Tailwind，但**控件高度**应与 `--tf-icon-btn-size` / `--tf-input-min-h` 一致。
+
+## 设置与其它 `*.css`
+
+- 设置面板见 `components/settings.css`：控件高度与按钮应对齐 `--tf-input-min-h` / `--tf-btn-min-h`。
+- 新增独立样式文件时，复用主题变量（`--bg-secondary`、`--border-color` 等）与 `--tf-*`，避免第三套互斥尺寸。
+
+## 禁止
+
+- 为单个功能复制一套「仅此处使用」的按钮高度常量而不走令牌或工具类。
+- 在紧凑 UI 相关规则外再引入 `!important` 覆盖整类控件尺寸（除非修复明确层叠 bug，并注明原因）。

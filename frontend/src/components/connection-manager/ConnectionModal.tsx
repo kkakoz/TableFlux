@@ -212,7 +212,7 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
           </div>
           <button
             type="button"
-            className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            className="tf-btn-icon text-slate-500 hover:text-slate-800"
             onClick={closeIfBackdrop}
             title="关闭"
           >
@@ -237,7 +237,7 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/80 px-4 py-3">
           <button
             type="button"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50"
+            className="tf-btn-toolbar text-[13px] text-slate-700"
             onClick={() => void handleCancel()}
             disabled={busy || testPhase === "loading"}
           >
@@ -245,7 +245,7 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
           </button>
           <button
             type="button"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="tf-btn-toolbar text-[13px] text-slate-700 disabled:opacity-50"
             onClick={handleTest}
             disabled={busy || testPhase === "loading"}
           >
@@ -253,7 +253,7 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
           </button>
           <button
             type="button"
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-[13px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+            className="tf-btn-primary text-[13px] disabled:opacity-50"
             onClick={handleSave}
             disabled={busy || testPhase === "loading"}
           >

@@ -56,12 +56,12 @@ export default function ConnectionListPanel({
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="搜索连接…"
             autoComplete="off"
-            className="h-10 w-full rounded-lg border border-slate-200 bg-white py-0 pl-10 pr-10 text-[12px] leading-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15"
+            className="tf-control w-full px-3 text-[12px] text-slate-900 placeholder:text-slate-400"
           />
         </div>
         <button
           type="button"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
+          className="tf-btn-primary shrink-0 gap-1.5 text-[12px] disabled:opacity-40"
           onClick={onNew}
           disabled={!groupTitle}
         >

@@ -85,7 +85,7 @@ export default function ConnectionCard({ connection: c, selected, onTest, onEdit
           <button
             type="button"
             title="测试连接"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-600 hover:bg-slate-100"
+            className="tf-btn-icon"
             onClick={(e) => {
               e.stopPropagation();
               onTest();
@@ -96,7 +96,7 @@ export default function ConnectionCard({ connection: c, selected, onTest, onEdit
           <button
             type="button"
             title="编辑"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-600 hover:bg-slate-100"
+            className="tf-btn-icon"
             onClick={(e) => {
               e.stopPropagation();
               onEdit();
@@ -107,7 +107,7 @@ export default function ConnectionCard({ connection: c, selected, onTest, onEdit
           <button
             type="button"
             title="删除"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-red-600 hover:bg-red-50"
+            className="tf-btn-icon text-red-600 hover:bg-red-50"
             onClick={(e) => {
               e.stopPropagation();
               onDelete();

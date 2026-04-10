@@ -139,10 +139,10 @@ body {
 }
 
 .btn-compact {
-  padding: 4px 10px;
-  font-size: 12px;
-  border-radius: 6px;
-  min-height: 28px;
+  padding: var(--tf-btn-padding-y, 4px) var(--tf-btn-padding-x, 10px);
+  font-size: var(--tf-btn-font-size, 12px);
+  border-radius: var(--tf-btn-radius, 6px);
+  min-height: var(--tf-btn-min-h, 28px);
 }
 
 .studio-title-wrap {
@@ -473,10 +473,10 @@ h2 {
 }
 
 .btn-workbench-xs {
-  min-height: 28px;
+  min-height: var(--tf-btn-min-h, 28px);
   padding: 3px 8px;
   font-size: 11px;
-  border-radius: 5px;
+  border-radius: var(--tf-btn-radius, 6px);
 }
 
 .panel {
@@ -515,15 +515,15 @@ input,
 select,
 textarea {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: var(--tf-input-radius, 6px);
+  padding: var(--tf-input-padding-y, 5px) var(--tf-input-padding-x, 8px);
   background: #fff;
   color: var(--text);
 }
 
 input,
 select {
-  min-height: 36px;
+  min-height: var(--tf-input-min-h, 32px);
   width: 100%;
 }
 
@@ -536,9 +536,12 @@ select {
   border: 1px solid var(--accent);
   background: var(--accent);
   color: #fff;
-  border-radius: 8px;
-  padding: 8px 12px;
+  border-radius: var(--tf-btn-radius, 6px);
+  padding: var(--tf-btn-padding-y, 4px) var(--tf-btn-padding-x, 10px);
+  min-height: var(--tf-btn-min-h, 28px);
+  font-size: var(--tf-btn-font-size, 12px);
   cursor: pointer;
+  box-sizing: border-box;
 }
 
 .btn.ghost {

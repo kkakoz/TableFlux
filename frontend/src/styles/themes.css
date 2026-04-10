@@ -1,5 +1,23 @@
 /* Light Theme (Default) */
 :root {
+  /*
+   * TableFlux 紧凑 UI 令牌（桌面客户端；与 index.css 工具类、public/style.css 共用）
+   * --tf-touch-min：建议的最小可点击边长（图标密排区）；文按钮用 --tf-btn-min-h
+   */
+  --tf-touch-min: 24px;
+  --tf-icon-btn-size: 28px;
+  --tf-btn-min-h: 28px;
+  --tf-btn-padding-x: 10px;
+  --tf-btn-padding-y: 4px;
+  --tf-btn-radius: 6px;
+  --tf-btn-font-size: 12px;
+  --tf-input-min-h: 32px;
+  --tf-input-padding-x: 8px;
+  --tf-input-padding-y: 5px;
+  --tf-input-radius: 6px;
+  --tf-gap-compact: 6px;
+  --tf-gap-tight: 4px;
+
   --bg-primary: #f5f7fb;
   --bg-secondary: #ffffff;
   --bg-tertiary: #f9fafb;
