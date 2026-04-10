@@ -6,6 +6,7 @@ import {
   GridColumnMenuIcon,
   getDefaultTheme,
   type DataEditorRef,
+  type EditableGridCell,
   type GridColumn,
   type Item,
   type GridCell,
@@ -14,7 +15,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { editor as MonacoEditorNS, IDisposable, IRange, languages } from "monaco-editor";
 import {
-  Ban,
+  Check,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -27,6 +28,7 @@ import {
   Settings2,
   SquareCode,
   Table2,
+  XCircle,
   X,
 } from "lucide-react";
 import { api } from "./api";
@@ -40,7 +42,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import ConnectionManager from "./components/connection-manager/ConnectionManager";
 import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal";
 import { formatCellForTimezone, readDisplayTimezone } from "./components/studio/timezoneDisplay";
-import { TableQueryRequest } from "../bindings/changeme";
+import { TableQueryRequest, UpdateRowsRequest } from "../bindings/changeme";
 import SqlEditorWithGutter from "./components/studio/SqlEditorWithGutter";
 import SqlHistoryModal from "./components/studio/SqlHistoryModal";
 import { pushSqlHistory, readSqlHistory } from "./utils/sqlHistory";
@@ -84,7 +86,56 @@ type WorkbenchTab = {
   tableQueryLoading?: boolean;
   /** 查询标签：正在执行 SQL 或 EXPLAIN */
   sqlResultLoading?: boolean;
+
+  /** SQL 结果分页（客户端切片） */
+  sqlGridPage?: number;
+
+  /** 表标签：主键列（用于更新） */
+  tablePrimaryKey?: string[];
+  /** 表标签：原始行快照（用于取消） */
+  tableEditOriginalRows?: Array<Record<string, unknown>>;
+  /** 表标签：脏行（key=当前页 rowIndex；value=列名→新值） */
+  tableEditDirtyRows?: Record<number, Record<string, unknown>>;
+  /** 表标签：预览 SQL Modal */
+  tableEditPreviewOpen?: boolean;
+  tableEditPreviewLoading?: boolean;
+  tableEditPreviewStatements?: string[];
+  tableEditApplyLoading?: boolean;
 };
+
+const CLIENT_GRID_PAGE_SIZE = 10000;
+
+function coerceEditedCellValue(original: unknown, text: string): unknown {
+  const t = text.trim();
+  if (t.toLowerCase() === "null") return null;
+  if (original === null || original === undefined) {
+    if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+    if (t === "true" || t === "false") return t === "true";
+    return text;
+  }
+  if (typeof original === "number") {
+    const n = Number(t);
+    return Number.isNaN(n) ? text : n;
+  }
+  if (typeof original === "boolean") {
+    if (t === "true" || t === "1") return true;
+    if (t === "false" || t === "0") return false;
+    return text;
+  }
+  return text;
+}
+
+function mergeTableRowsForDisplay(
+  base: Array<Record<string, unknown>>,
+  dirty: Record<number, Record<string, unknown>> | undefined,
+): Array<Record<string, unknown>> {
+  if (!dirty || Object.keys(dirty).length === 0) return base;
+  return base.map((row, i) => {
+    const patch = dirty[i];
+    if (!patch) return row;
+    return { ...row, ...patch };
+  });
+}
 
 const createSqlTab = (index: number, connectionId: string, database: string): WorkbenchTab => ({
   id: crypto.randomUUID(),
@@ -318,6 +369,24 @@ function StudioView({ groupId }: { groupId: string }) {
     return c?.driver === "postgres" ? "postgres" : "mysql";
   }, [connections, activeConnectionId]);
 
+  const getOrFetchTableSchema = useCallback(
+    async (connectionId: string, dbName: string, tableName: string, dialect: "mysql" | "postgres") => {
+      const schemaName = dialect === "postgres" ? "public" : "";
+      const cacheKey = `${connectionId}|${dbName}|${schemaName}|${tableName}`;
+      const cached = tableSchemaCacheRef.current.get(cacheKey);
+      if (cached) return cached;
+      const schema = (await api.getTableSchema({
+        connectionId,
+        database: dbName,
+        schema: schemaName,
+        table: tableName,
+      })) as TableSchema;
+      tableSchemaCacheRef.current.set(cacheKey, schema);
+      return schema;
+    },
+    [],
+  );
+
   const runTablePageQuery = useCallback(
     async (
       tabId: string,
@@ -335,6 +404,14 @@ function StudioView({ groupId }: { groupId: string }) {
         };
       });
       try {
+        let pkCols: string[] | undefined;
+        try {
+          const schema = await getOrFetchTableSchema(activeConnectionId, dbName, tableName, sqlDialect);
+          pkCols = (schema.primaryKey || []).filter(Boolean);
+        } catch {
+          pkCols = undefined;
+        }
+
         const limit = await resolveQueryLimit();
         const page = await api.queryTablePage(
           new TableQueryRequest({
@@ -349,6 +426,7 @@ function StudioView({ groupId }: { groupId: string }) {
           }),
         );
         const result = queryResultPageToExecuteSQLResult(page);
+        const originalRows = (result.rows ?? []).map((r) => ({ ...r })) as Array<Record<string, unknown>>;
         const lastSql = buildTableBrowseSqlDisplay(
           tableName,
           sqlDialect,
@@ -374,6 +452,9 @@ function StudioView({ groupId }: { groupId: string }) {
                     tablePageLimit: page.limit,
                     tableSortColumn: opts.orderBy || undefined,
                     tableSortDesc: opts.orderDesc,
+                    tablePrimaryKey: pkCols,
+                    tableEditOriginalRows: originalRows,
+                    tableEditDirtyRows: {},
                   }
                 : t,
             ),
@@ -391,7 +472,7 @@ function StudioView({ groupId }: { groupId: string }) {
         });
       }
     },
-    [activeConnectionId, sqlDialect],
+    [activeConnectionId, getOrFetchTableSchema, sqlDialect],
   );
 
   /** 会话恢复或切换回表标签页时 result 为空，自动拉取（新建表标签由本逻辑加载；对象树再次点击已存在表仍由 appendSelectSQL 显式刷新） */
@@ -813,6 +894,169 @@ function StudioView({ groupId }: { groupId: string }) {
     });
   }, [activeTab, runTablePageQuery]);
 
+  const patchActiveTableTab = useCallback(
+    (updater: (t: WorkbenchTab) => WorkbenchTab) => {
+      if (!activeTab || activeTab.type !== "table" || !activeConnectionId) return;
+      const db = activeTab.contextDb || selectedDatabase;
+      const key = `${activeConnectionId}::${db || "__none__"}`;
+      setTabsByDatabase((prev) => {
+        const list = prev[key] ?? [];
+        return {
+          ...prev,
+          [key]: list.map((t) => (t.id === activeTab.id ? updater(t) : t)),
+        };
+      });
+    },
+    [activeTab, activeConnectionId, selectedDatabase],
+  );
+
+  const handleTableCellEdit = useCallback(
+    (rowIndex: number, colName: string, value: unknown) => {
+      if (!activeTab || activeTab.type !== "table") return;
+      patchActiveTableTab((t) => {
+        const orig = t.tableEditOriginalRows?.[rowIndex];
+        if (!orig) return t;
+        const baseVal = orig[colName];
+        const same =
+          (baseVal === null || baseVal === undefined) && (value === null || value === undefined)
+            ? true
+            : baseVal === value;
+        const nextDirty = { ...(t.tableEditDirtyRows ?? {}) };
+        const rowPatch = { ...(nextDirty[rowIndex] ?? {}) };
+        if (same) {
+          delete rowPatch[colName];
+          if (Object.keys(rowPatch).length === 0) delete nextDirty[rowIndex];
+          else nextDirty[rowIndex] = rowPatch;
+        } else {
+          rowPatch[colName] = value;
+          nextDirty[rowIndex] = rowPatch;
+        }
+        return { ...t, tableEditDirtyRows: nextDirty };
+      });
+    },
+    [activeTab, patchActiveTableTab],
+  );
+
+  const handleTableCancelEdit = useCallback(() => {
+    patchActiveTableTab((t) => ({ ...t, tableEditDirtyRows: {} }));
+  }, [patchActiveTableTab]);
+
+  const handleTableOpenPreview = useCallback(async () => {
+    if (!activeTab || activeTab.type !== "table" || !activeConnectionId) return;
+    const pk = activeTab.tablePrimaryKey ?? [];
+    if (pk.length === 0) {
+      setError("无法确定主键，无法生成更新语句");
+      return;
+    }
+    const dirty = activeTab.tableEditDirtyRows ?? {};
+    const dirtyIndices = Object.keys(dirty).map((k) => Number(k)).filter((i) => !Number.isNaN(i));
+    if (dirtyIndices.length === 0) {
+      setError("没有未提交的修改");
+      return;
+    }
+    const orig = activeTab.tableEditOriginalRows ?? [];
+    const rows: Array<Record<string, unknown>> = [];
+    for (const i of dirtyIndices) {
+      const patch = dirty[i];
+      if (!patch || Object.keys(patch).length === 0) continue;
+      const base = orig[i];
+      if (!base) continue;
+      rows.push({ ...base, ...patch });
+    }
+    if (rows.length === 0) {
+      setError("没有可提交的修改");
+      return;
+    }
+    patchActiveTableTab((t) => ({
+      ...t,
+      tableEditPreviewOpen: true,
+      tableEditPreviewLoading: true,
+      tableEditPreviewStatements: undefined,
+    }));
+    try {
+      const r = await api.previewUpdateRowsSQL(
+        new UpdateRowsRequest({
+          connectionId: activeConnectionId,
+          database: activeTab.contextDb,
+          schema: sqlDialect === "postgres" ? "public" : "",
+          table: activeTab.contextTable,
+          keyColumns: pk,
+          rows,
+        }),
+      );
+      patchActiveTableTab((t) => ({
+        ...t,
+        tableEditPreviewLoading: false,
+        tableEditPreviewStatements: r.statements ?? [],
+      }));
+      setError("");
+    } catch (e) {
+      patchActiveTableTab((t) => ({
+        ...t,
+        tableEditPreviewLoading: false,
+        tableEditPreviewOpen: false,
+        tableEditPreviewStatements: undefined,
+      }));
+      setError(String(e));
+    }
+  }, [activeTab, activeConnectionId, patchActiveTableTab, sqlDialect]);
+
+  const handleTableClosePreview = useCallback(() => {
+    patchActiveTableTab((t) => ({
+      ...t,
+      tableEditPreviewOpen: false,
+      tableEditPreviewLoading: false,
+      tableEditPreviewStatements: undefined,
+    }));
+  }, [patchActiveTableTab]);
+
+  const handleTableApplyPreview = useCallback(async () => {
+    if (!activeTab || activeTab.type !== "table" || !activeConnectionId) return;
+    const pk = activeTab.tablePrimaryKey ?? [];
+    const dirty = activeTab.tableEditDirtyRows ?? {};
+    const orig = activeTab.tableEditOriginalRows ?? [];
+    const rows: Array<Record<string, unknown>> = [];
+    for (const k of Object.keys(dirty)) {
+      const i = Number(k);
+      if (Number.isNaN(i)) continue;
+      const patch = dirty[i];
+      if (!patch || Object.keys(patch).length === 0) continue;
+      const base = orig[i];
+      if (!base) continue;
+      rows.push({ ...base, ...patch });
+    }
+    if (pk.length === 0 || rows.length === 0) return;
+    patchActiveTableTab((t) => ({ ...t, tableEditApplyLoading: true }));
+    try {
+      await api.updateRows(
+        new UpdateRowsRequest({
+          connectionId: activeConnectionId,
+          database: activeTab.contextDb,
+          schema: sqlDialect === "postgres" ? "public" : "",
+          table: activeTab.contextTable,
+          keyColumns: pk,
+          rows,
+        }),
+      );
+      patchActiveTableTab((t) => ({
+        ...t,
+        tableEditApplyLoading: false,
+        tableEditPreviewOpen: false,
+        tableEditPreviewStatements: undefined,
+        tableEditDirtyRows: {},
+      }));
+      setError("");
+      void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+        offset: activeTab.tableOffset ?? 0,
+        orderBy: activeTab.tableSortColumn ?? "",
+        orderDesc: activeTab.tableSortDesc ?? false,
+      });
+    } catch (e) {
+      patchActiveTableTab((t) => ({ ...t, tableEditApplyLoading: false }));
+      setError(String(e));
+    }
+  }, [activeTab, activeConnectionId, patchActiveTableTab, runTablePageQuery, sqlDialect]);
+
   const appendSelectSQL = (dbName: string, tableName: string) => {
     if (!activeConnectionId) return;
     setSelectedDatabase(dbName);
@@ -873,7 +1117,9 @@ function StudioView({ groupId }: { groupId: string }) {
       setHistoryRev((n) => n + 1);
       upsertDatabaseTabs(selectedDatabase, (list) =>
         list.map((t) =>
-          t.id === activeTab.id ? { ...t, sqlResultLoading: false, result: r, error: "", lastExecutedSql: trimmed } : t,
+          t.id === activeTab.id
+            ? { ...t, sqlResultLoading: false, result: r, error: "", lastExecutedSql: trimmed, sqlGridPage: 1 }
+            : t,
         )
       );
       setError("");
@@ -1655,13 +1901,117 @@ function StudioView({ groupId }: { groupId: string }) {
                               <span className="text-[11px] text-slate-500">正在执行 SQL…</span>
                             </div>
                           )}
-                          <VirtualResultGrid
-                            columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
-                            columnTypes={activeTabResult.columnTypes}
-                            rows={activeTabResult.rows as Array<Record<string, unknown>>}
-                            displayTimezone={displayTimezone}
-                            onCopyError={(msg) => setError(msg)}
-                          />
+                          {(() => {
+                            const rows = (activeTabResult.rows as Array<Record<string, unknown>>) ?? [];
+                            const page = Math.max(1, activeTab?.sqlGridPage ?? 1);
+                            const totalPages = Math.max(1, Math.ceil(rows.length / CLIENT_GRID_PAGE_SIZE));
+                            const safePage = Math.min(page, totalPages);
+                            const start = (safePage - 1) * CLIENT_GRID_PAGE_SIZE;
+                            const end = Math.min(start + CLIENT_GRID_PAGE_SIZE, rows.length);
+                            const pageRows = rows.slice(start, end);
+                            const busy = activeTab?.sqlResultLoading ?? false;
+                            return (
+                              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                                <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
+                                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                                    <div className="flex shrink-0 items-center gap-1">
+                                      <button
+                                        type="button"
+                                        className="tf-btn-icon-lg tf-btn-icon-bordered text-emerald-600"
+                                        disabled
+                                        title="SQL 查询结果不支持按主键更新（请使用表数据标签页）"
+                                        aria-label="执行"
+                                      >
+                                        <Check className="h-4 w-4" strokeWidth={2.5} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="tf-btn-icon-lg tf-btn-icon-bordered text-slate-500"
+                                        disabled
+                                        title="无可撤销的编辑"
+                                        aria-label="取消"
+                                      >
+                                        <XCircle className="h-4 w-4" strokeWidth={2.5} />
+                                      </button>
+                                    </div>
+                                    <div className="min-w-0 pt-0.5 font-mono text-[13px] text-slate-600">
+                                      <span className="text-slate-400">结果</span>{" "}
+                                      <span className="text-[11px] tabular-nums text-slate-500">
+                                        {rows.length > CLIENT_GRID_PAGE_SIZE ? `${safePage} / ${totalPages} · ` : ""}
+                                        {Math.min(CLIENT_GRID_PAGE_SIZE, rows.length - start)}/{rows.length}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                                    {rows.length > CLIENT_GRID_PAGE_SIZE ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          aria-label="上一页"
+                                          aria-disabled={safePage <= 1 || busy}
+                                          title={busy ? "加载中…" : safePage <= 1 ? "已是第一页" : "上一页"}
+                                          onClick={() => {
+                                            if (busy) return;
+                                            upsertDatabaseTabs(selectedDatabase, (list) =>
+                                              list.map((t) =>
+                                                t.id === activeTab?.id ? { ...t, sqlGridPage: Math.max(1, safePage - 1) } : t,
+                                              ),
+                                            );
+                                          }}
+                                          className="tf-btn-icon-lg tf-btn-icon-bordered"
+                                          disabled={safePage <= 1 || busy}
+                                        >
+                                          <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          aria-label="下一页"
+                                          aria-disabled={safePage >= totalPages || busy}
+                                          title={busy ? "加载中…" : safePage >= totalPages ? "已是最后一页" : "下一页"}
+                                          onClick={() => {
+                                            if (busy) return;
+                                            upsertDatabaseTabs(selectedDatabase, (list) =>
+                                              list.map((t) =>
+                                                t.id === activeTab?.id ? { ...t, sqlGridPage: Math.min(totalPages, safePage + 1) } : t,
+                                              ),
+                                            );
+                                          }}
+                                          className="tf-btn-icon-lg tf-btn-icon-bordered"
+                                          disabled={safePage >= totalPages || busy}
+                                        >
+                                          <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+                                        </button>
+                                      </>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      aria-label="刷新"
+                                      title="刷新"
+                                      disabled={!activeConnectionId || busy}
+                                      className="tf-btn-icon-lg tf-btn-icon-bordered"
+                                      onClick={() => {
+                                        if (!activeConnectionId || !activeTab) return;
+                                        void executeSqlForActiveTab(activeTab.sql, "single");
+                                      }}
+                                    >
+                                      <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} strokeWidth={2} />
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="min-h-0 flex-1 overflow-hidden p-3">
+                                  <VirtualResultGrid
+                                    columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
+                                    columnTypes={activeTabResult.columnTypes}
+                                    rows={pageRows}
+                                    displayTimezone={displayTimezone}
+                                    onCopyError={(msg) => setError(msg)}
+                                    serverMode
+                                    rowNumberStart={start + 1}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       ) : (
                         <div className="relative min-h-0 flex-1">
@@ -1684,116 +2034,124 @@ function StudioView({ groupId }: { groupId: string }) {
 
             {activeTab?.type === "table" && (
               <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
-                  <div className="min-w-0 pt-0.5 font-mono text-[13px] text-slate-600">
-                    <span className="text-slate-400">表</span>{" "}
-                    <span className="font-medium text-slate-800" title={activeTab.contextTable}>
-                      {activeTab.contextTable}
-                    </span>
-                    {activeTab.contextDb ? (
-                      <span className="text-slate-400"> · {activeTab.contextDb}</span>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                    {activeTab.tableTotal != null &&
-                      activeTab.tablePageLimit != null &&
-                      activeTab.tableTotal > activeTab.tablePageLimit && (
-                        <>
-                          {(() => {
-                            const tBusy = activeTab.tableQueryLoading ?? false;
-                            const off = activeTab.tableOffset ?? 0;
-                            const lim = activeTab.tablePageLimit ?? 5000;
-                            const total = activeTab.tableTotal ?? 0;
-                            const prevDisabled = off <= 0 || tBusy;
-                            const nextDisabled = tBusy || off + lim >= total;
-                            return (
-                              <>
-                                <button
-                                  type="button"
-                                  aria-label="上一页"
-                                  aria-disabled={prevDisabled}
-                                  title={tBusy ? "加载中…" : off <= 0 ? "已是第一页" : "上一页"}
-                                  onClick={() => {
-                                    if (prevDisabled || !activeTab.contextTable) return;
-                                    void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
-                                      offset: Math.max(0, off - lim),
-                                      orderBy: activeTab.tableSortColumn ?? "",
-                                      orderDesc: activeTab.tableSortDesc ?? false,
-                                    });
-                                  }}
-                                  className={`group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                                    prevDisabled
-                                      ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
-                                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                                  }`}
-                                >
-                                  <ChevronLeft
-                                    className={`h-2.5 w-2.5 ${prevDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
-                                    strokeWidth={2.5}
-                                  />
-                                  {prevDisabled ? (
-                                    <Ban
-                                      className="pointer-events-none absolute h-2 w-2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
-                                      strokeWidth={2}
-                                      aria-hidden
-                                    />
-                                  ) : null}
-                                </button>
-                                <span className="text-[10px] tabular-nums text-slate-500">
-                                  {Math.floor(off / (lim || 1)) + 1} / {Math.max(1, Math.ceil(total / (lim || 1)))} · {lim}/
-                                  {total}
-                                </span>
-                                <button
-                                  type="button"
-                                  aria-label="下一页"
-                                  aria-disabled={nextDisabled}
-                                  title={tBusy ? "加载中…" : off + lim >= total ? "已是最后一页" : "下一页"}
-                                  onClick={() => {
-                                    if (nextDisabled || !activeTab.contextTable) return;
-                                    void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
-                                      offset: off + lim,
-                                      orderBy: activeTab.tableSortColumn ?? "",
-                                      orderDesc: activeTab.tableSortDesc ?? false,
-                                    });
-                                  }}
-                                  className={`group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                                    nextDisabled
-                                      ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
-                                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                                  }`}
-                                >
-                                  <ChevronRight
-                                    className={`h-2.5 w-2.5 ${nextDisabled ? "transition-opacity group-hover:opacity-0" : ""}`}
-                                    strokeWidth={2.5}
-                                  />
-                                  {nextDisabled ? (
-                                    <Ban
-                                      className="pointer-events-none absolute h-2 w-2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
-                                      strokeWidth={2}
-                                      aria-hidden
-                                    />
-                                  ) : null}
-                                </button>
-                              </>
-                            );
-                          })()}
-                        </>
-                      )}
-                    <button
-                      type="button"
-                      aria-label="刷新当前页"
-                      title="刷新"
-                      disabled={!activeTab.contextTable || (activeTab.tableQueryLoading ?? false)}
-                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
-                      onClick={() => refreshActiveTableTab()}
-                    >
-                      <RefreshCw
-                        className={`h-2.5 w-2.5 ${activeTab.tableQueryLoading ? "animate-spin" : ""}`}
-                        strokeWidth={2}
-                      />
-                    </button>
-                  </div>
-                </div>
+                {(() => {
+                  const pkCols = activeTab.tablePrimaryKey ?? [];
+                  const hasPk = pkCols.length > 0;
+                  const dirtyMap = activeTab.tableEditDirtyRows ?? {};
+                  const hasDirty = Object.keys(dirtyMap).some((k) => {
+                    const p = dirtyMap[Number(k)];
+                    return p && Object.keys(p).length > 0;
+                  });
+                  const tBusy = activeTab.tableQueryLoading ?? false;
+                  const off = activeTab.tableOffset ?? 0;
+                  const lim = activeTab.tablePageLimit ?? 5000;
+                  const total = activeTab.tableTotal ?? 0;
+                  const showPager =
+                    activeTab.tableTotal != null &&
+                    activeTab.tablePageLimit != null &&
+                    activeTab.tableTotal > activeTab.tablePageLimit;
+                  const prevDisabled = off <= 0 || tBusy;
+                  const nextDisabled = tBusy || off + lim >= total;
+                  return (
+                    <div className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            className="tf-btn-icon-lg tf-btn-icon-bordered text-emerald-600"
+                            disabled={!hasPk || !hasDirty || tBusy || activeTab.tableEditPreviewLoading}
+                            title={
+                              !hasPk
+                                ? "无主键信息，无法更新"
+                                : !hasDirty
+                                  ? "没有未提交的修改"
+                                  : "预览并提交更新"
+                            }
+                            aria-label="执行"
+                            onClick={() => void handleTableOpenPreview()}
+                          >
+                            <Check className="h-4 w-4" strokeWidth={2.5} />
+                          </button>
+                          <button
+                            type="button"
+                            className="tf-btn-icon-lg tf-btn-icon-bordered text-slate-500"
+                            disabled={!hasDirty || tBusy}
+                            title={hasDirty ? "撤销未提交的修改" : "没有未提交的修改"}
+                            aria-label="取消"
+                            onClick={() => handleTableCancelEdit()}
+                          >
+                            <XCircle className="h-4 w-4" strokeWidth={2.5} />
+                          </button>
+                        </div>
+                        <div className="min-w-0 pt-0.5 font-mono text-[13px] text-slate-600">
+                          <span className="text-slate-400">表</span>{" "}
+                          <span className="font-medium text-slate-800" title={activeTab.contextTable}>
+                            {activeTab.contextTable}
+                          </span>
+                          {activeTab.contextDb ? (
+                            <span className="text-slate-400"> · {activeTab.contextDb}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                        {showPager ? (
+                          <>
+                            <button
+                              type="button"
+                              aria-label="上一页"
+                              aria-disabled={prevDisabled}
+                              title={tBusy ? "加载中…" : off <= 0 ? "已是第一页" : "上一页"}
+                              onClick={() => {
+                                if (prevDisabled || !activeTab.contextTable) return;
+                                void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                  offset: Math.max(0, off - lim),
+                                  orderBy: activeTab.tableSortColumn ?? "",
+                                  orderDesc: activeTab.tableSortDesc ?? false,
+                                });
+                              }}
+                              className="tf-btn-icon-lg tf-btn-icon-bordered"
+                              disabled={prevDisabled}
+                            >
+                              <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+                            </button>
+                            <span className="text-[11px] tabular-nums text-slate-500">
+                              {Math.floor(off / (lim || 1)) + 1} / {Math.max(1, Math.ceil(total / (lim || 1)))} · {lim}/
+                              {total}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label="下一页"
+                              aria-disabled={nextDisabled}
+                              title={tBusy ? "加载中…" : off + lim >= total ? "已是最后一页" : "下一页"}
+                              onClick={() => {
+                                if (nextDisabled || !activeTab.contextTable) return;
+                                void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+                                  offset: off + lim,
+                                  orderBy: activeTab.tableSortColumn ?? "",
+                                  orderDesc: activeTab.tableSortDesc ?? false,
+                                });
+                              }}
+                              className="tf-btn-icon-lg tf-btn-icon-bordered"
+                              disabled={nextDisabled}
+                            >
+                              <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+                            </button>
+                          </>
+                        ) : null}
+                        <button
+                          type="button"
+                          aria-label="刷新当前页"
+                          title="刷新"
+                          disabled={!activeTab.contextTable || tBusy}
+                          className="tf-btn-icon-lg tf-btn-icon-bordered"
+                          onClick={() => refreshActiveTableTab()}
+                        >
+                          <RefreshCw className={`h-4 w-4 ${tBusy ? "animate-spin" : ""}`} strokeWidth={2} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
                   {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
                   {(activeTab.tableQueryLoading ?? false) && !activeTabResult ? (
@@ -1830,7 +2188,11 @@ function StudioView({ groupId }: { groupId: string }) {
                           <VirtualResultGrid
                             columns={activeTabResult.columns}
                             columnTypes={activeTabResult.columnTypes}
-                            rows={(activeTabResult.rows ?? []) as Array<Record<string, unknown>>}
+                            rows={mergeTableRowsForDisplay(
+                              (activeTab.tableEditOriginalRows ??
+                                (activeTabResult.rows ?? [])) as Array<Record<string, unknown>>,
+                              activeTab.tableEditDirtyRows,
+                            )}
                             displayTimezone={displayTimezone}
                             serverMode
                             sortColumn={activeTab.tableSortColumn}
@@ -1847,6 +2209,9 @@ function StudioView({ groupId }: { groupId: string }) {
                               });
                             }}
                             onCopyError={(msg) => setError(msg)}
+                            editable={(activeTab.tablePrimaryKey?.length ?? 0) > 0}
+                            primaryKeyColumns={activeTab.tablePrimaryKey ?? []}
+                            onCellValueChange={handleTableCellEdit}
                           />
                         </div>
                       ) : (
@@ -1913,6 +2278,74 @@ function StudioView({ groupId }: { groupId: string }) {
           onCleared={() => setHistoryRev((r) => r + 1)}
           onCopyError={(msg) => setError(msg)}
         />
+
+        {activeTab?.type === "table" && activeTab.tableEditPreviewOpen
+          ? createPortal(
+              <div
+                className="modal-mask"
+                style={{ zIndex: 10002 }}
+                role="presentation"
+                onClick={() => {
+                  if (activeTab.tableEditPreviewLoading || activeTab.tableEditApplyLoading) return;
+                  handleTableClosePreview();
+                }}
+              >
+                <div className="modal-panel large max-w-[min(96vw,720px)]" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-head">
+                    <h3 className="text-sm font-medium text-slate-800">确认更新</h3>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        className="btn ghost text-xs"
+                        disabled={!activeTab.tableEditPreviewStatements?.length}
+                        onClick={() => {
+                          const text = (activeTab.tableEditPreviewStatements ?? []).join("\n\n");
+                          void navigator.clipboard.writeText(text).catch(() => setError("复制失败"));
+                        }}
+                      >
+                        复制全部
+                      </button>
+                    </div>
+                  </div>
+                  {activeTab.tableEditPreviewLoading ? (
+                    <div className="flex min-h-[200px] items-center justify-center gap-2 py-8">
+                      <Loader2 className="h-8 w-8 animate-spin text-slate-400" strokeWidth={2} />
+                      <span className="text-sm text-slate-500">正在生成 SQL…</span>
+                    </div>
+                  ) : (
+                    <textarea
+                      readOnly
+                      className="tf-scrollbar h-[min(50vh,420px)] w-full resize-y rounded border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] leading-relaxed text-slate-800"
+                      value={(activeTab.tableEditPreviewStatements ?? []).join("\n\n")}
+                      aria-label="待执行的 UPDATE 语句"
+                    />
+                  )}
+                  <div className="mt-4 flex justify-end gap-2 border-t border-slate-200/80 pt-3">
+                    <button
+                      type="button"
+                      className="btn ghost text-xs"
+                      disabled={Boolean(activeTab.tableEditPreviewLoading || activeTab.tableEditApplyLoading)}
+                      onClick={() => handleTableClosePreview()}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="btn text-xs"
+                      disabled={
+                        Boolean(activeTab.tableEditPreviewLoading || activeTab.tableEditApplyLoading) ||
+                        !(activeTab.tableEditPreviewStatements && activeTab.tableEditPreviewStatements.length > 0)
+                      }
+                      onClick={() => void handleTableApplyPreview()}
+                    >
+                      {activeTab.tableEditApplyLoading ? "执行中…" : "确定"}
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
 
         {aiAssistOpen && aiAssistPos && (
           <>
@@ -2090,6 +2523,9 @@ function VirtualResultGrid({
   sortDesc,
   rowNumberStart = 1,
   onSortOrder,
+  editable = false,
+  primaryKeyColumns = [],
+  onCellValueChange,
 }: {
   columns: string[];
   /** 与 columns 同序；缺省时不提供「查看完整内容」 */
@@ -2103,6 +2539,9 @@ function VirtualResultGrid({
   rowNumberStart?: number;
   /** 表标签页：列头右侧下拉选择升序/降序 */
   onSortOrder?: (colIndex: number, order: "asc" | "desc") => void;
+  editable?: boolean;
+  primaryKeyColumns?: string[];
+  onCellValueChange?: (rowIndex: number, columnName: string, value: unknown) => void;
 }) {
   const PAGE_SIZE = 10000;
   const [page, setPage] = useState(1);
@@ -2118,6 +2557,8 @@ function VirtualResultGrid({
   const contextMenuCellRef = useRef<Item | null>(null);
   /** glide-data-grid 在任意两次 mouseup 间隔 <500ms 都会设 isDoubleClick，不校验是否同一格；此处自行判定「同格双击」 */
   const lastCellPointerRef = useRef<{ col: number; row: number; at: number } | null>(null);
+
+  const pkSet = useMemo(() => new Set(primaryKeyColumns ?? []), [primaryKeyColumns.join("|")]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -2248,11 +2689,14 @@ function VirtualResultGrid({
     return ([col, row]: Item): GridCell => {
       const colName = columns[col];
       const raw = colName ? pageRows[row]?.[colName] : undefined;
+      const isPk = Boolean(colName && pkSet.has(colName));
+      const canEdit = Boolean(editable && onCellValueChange && colName && !isPk);
+
       if (colName && (raw === null || raw === undefined)) {
         return {
           kind: GridCellKind.Text,
-          allowOverlay: false,
-          readonly: true,
+          allowOverlay: canEdit,
+          readonly: !canEdit,
           displayData: "null",
           data: "null",
           themeOverride: {
@@ -2265,13 +2709,13 @@ function VirtualResultGrid({
       const value = colName ? formatCellForTimezone(raw, colName, displayTimezone) : "";
       return {
         kind: GridCellKind.Text,
-        allowOverlay: false,
-        readonly: true,
+        allowOverlay: canEdit,
+        readonly: !canEdit,
         displayData: value,
         data: value,
       };
     };
-  }, [columns, pageRows, displayTimezone]);
+  }, [columns, pageRows, displayTimezone, editable, onCellValueChange, pkSet]);
 
   const copySelection = async () => {
     try {
@@ -2304,9 +2748,12 @@ function VirtualResultGrid({
           headerHeight={GRID_HEADER_HEIGHT}
           rowMarkers={{ kind: "number", width: ROW_MARKER_WIDTH, startIndex: markerStart }}
           rowSelectionMode="multi"
+          rangeSelect={editable ? "cell" : "rect"}
           smoothScrollX
           smoothScrollY
           overscrollX={16}
+          /** single-click 与 Glide 内部 selection 同步存在竞态，reselect 读到的 cell 可能未更新，导致无法弹出编辑层；改用 second-click（两次点同一格）并与 editOnType + focus 配合实现「点选后输入」 */
+          cellActivationBehavior={editable ? "second-click" : "double-click"}
           onColumnResize={onColumnResize}
           onHeaderMenuClick={
             serverMode && onSortOrder
@@ -2315,9 +2762,25 @@ function VirtualResultGrid({
                 }
               : undefined
           }
+          onCellEdited={(cell, newVal: EditableGridCell) => {
+            if (!editable || !onCellValueChange) return;
+            if (newVal.kind !== GridCellKind.Text) return;
+            const [c, r] = cell;
+            if (r < 0 || c < 0 || c >= columns.length) return;
+            const colName = columns[c];
+            if (!colName || pkSet.has(colName)) return;
+            const rawOld = pageRows[r]?.[colName];
+            const next = coerceEditedCellValue(rawOld, newVal.data);
+            onCellValueChange(r, colName, next);
+          }}
           onCellClicked={(cell) => {
             const [c, r] = cell;
             if (r < 0 || c < 0 || c >= columns.length) return;
+            if (editable) {
+              lastCellPointerRef.current = null;
+              void dataEditorRef.current?.focus();
+              return;
+            }
             const dbType = columnTypes?.[c];
             if (!isExpandableLongTextColumnType(dbType)) {
               lastCellPointerRef.current = null;
@@ -2334,6 +2797,7 @@ function VirtualResultGrid({
             }
             lastCellPointerRef.current = { col: c, row: r, at: now };
           }}
+          onCellActivated={editable ? () => void dataEditorRef.current?.focus() : undefined}
           onCellContextMenu={(cell, event) => {
             event.preventDefault();
             contextMenuCellRef.current = cell;

@@ -135,6 +135,11 @@ type UpdateRowsRequest struct {
 	Rows         []map[string]any `json:"rows"`
 }
 
+// UpdateRowsSQLPreviewResponse 与 UpdateRows 请求一致时生成的可展示 UPDATE 文本（按方言转义字面量）。
+type UpdateRowsSQLPreviewResponse struct {
+	Statements []string `json:"statements"`
+}
+
 type DeleteRowsRequest struct {
 	ConnectionID string           `json:"connectionId"`
 	Database     string           `json:"database"`

@@ -16,6 +16,7 @@ alwaysApply: false
 ## Studio / Tailwind 区域
 
 - 图标按钮、工具栏文字按钮：使用 `index.css` 中的 `.tf-btn-icon`、`.tf-btn-icon-bordered`、`.tf-btn-toolbar`、`.tf-btn-toolbar-play`，避免再堆一长串 `h-8` + `rounded-md` + `border`。
+- **数据结果区工具栏**（单表 / SQL 结果上方的分页、刷新、执行/取消）：使用较大图标按钮变体 `.tf-btn-icon-lg`、`.tf-btn-icon-lg.tf-btn-icon-bordered`，尺寸令牌为 `themes.css` 中的 `--tf-icon-btn-size-lg`（与全局紧凑小按钮并存，见 OpenSpec `frontend-compact-ui` delta）。
 - 主操作（蓝底）：`.tf-btn-primary`；次要描边：`.tf-btn-toolbar`。
 - 表单 `input` / `select`：`.tf-control`；与 Studio 顶栏同高的下拉：叠加 `.tf-control-sm`（如「选择连接」）。
 - 需要行内微调时，可叠加 Tailwind，但**控件高度**应与 `--tf-icon-btn-size` / `--tf-input-min-h` 一致。

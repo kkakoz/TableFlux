@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -517,13 +518,13 @@ func (s *DatabaseService) UpdateRows(req UpdateRowsRequest) (SQLExecutionResult,
 		where := []string{}
 		args := []any{}
 		argPos := 1
-		for k, v := range row {
-			if contains(req.KeyColumns, k) {
-				continue
-			}
+		for _, k := range sortedNonKeyColumns(row, req.KeyColumns) {
 			setCols = append(setCols, fmt.Sprintf("%s=%s", quoteIdentifier(conn.Driver, k), placeholder(conn.Driver, argPos)))
-			args = append(args, v)
+			args = append(args, row[k])
 			argPos++
+		}
+		if len(setCols) == 0 {
+			return SQLExecutionResult{}, errors.New("no columns to update (only key columns present)")
 		}
 		for _, key := range req.KeyColumns {
 			where = append(where, fmt.Sprintf("%s=%s", quoteIdentifier(conn.Driver, key), placeholder(conn.Driver, argPos)))
@@ -539,6 +540,26 @@ func (s *DatabaseService) UpdateRows(req UpdateRowsRequest) (SQLExecutionResult,
 		total += ra
 	}
 	return SQLExecutionResult{RowsAffected: total, Message: fmt.Sprintf("Updated %d rows", total)}, nil
+}
+
+// PreviewUpdateRowsSQL 生成与 UpdateRows 语义一致的 UPDATE 语句（展示用字符串字面量已按方言转义）。
+func (s *DatabaseService) PreviewUpdateRowsSQL(req UpdateRowsRequest) (UpdateRowsSQLPreviewResponse, error) {
+	conn, _, err := s.getPool(req.ConnectionID, req.Database)
+	if err != nil {
+		return UpdateRowsSQLPreviewResponse{}, err
+	}
+	if len(req.Rows) == 0 || len(req.KeyColumns) == 0 {
+		return UpdateRowsSQLPreviewResponse{}, errors.New("rows and keyColumns are required")
+	}
+	stmts := make([]string, 0, len(req.Rows))
+	for _, row := range req.Rows {
+		keys := sortedNonKeyColumns(row, req.KeyColumns)
+		if len(keys) == 0 {
+			return UpdateRowsSQLPreviewResponse{}, errors.New("no columns to update (only key columns present)")
+		}
+		stmts = append(stmts, buildUpdateStatementPreview(conn.Driver, req.Schema, req.Table, req.KeyColumns, row, keys))
+	}
+	return UpdateRowsSQLPreviewResponse{Statements: stmts}, nil
 }
 
 func (s *DatabaseService) DeleteRows(req DeleteRowsRequest) (SQLExecutionResult, error) {
@@ -998,4 +1019,93 @@ func contains(items []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// sortedNonKeyColumns returns non-PK column names in stable order for SET / preview.
+func sortedNonKeyColumns(row map[string]any, keyColumns []string) []string {
+	var keys []string
+	for k := range row {
+		if contains(keyColumns, k) {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func buildUpdateStatementPreview(driver, schema, table string, keyColumns []string, row map[string]any, setKeys []string) string {
+	tref := tableRef(driver, schema, table)
+	setParts := make([]string, 0, len(setKeys))
+	for _, k := range setKeys {
+		setParts = append(setParts, fmt.Sprintf("%s=%s", quoteIdentifier(driver, k), formatSQLLiteralForPreview(driver, row[k])))
+	}
+	whereParts := make([]string, 0, len(keyColumns))
+	for _, k := range keyColumns {
+		whereParts = append(whereParts, fmt.Sprintf("%s=%s", quoteIdentifier(driver, k), formatSQLLiteralForPreview(driver, row[k])))
+	}
+	return fmt.Sprintf("UPDATE %s SET %s WHERE %s", tref, strings.Join(setParts, ", "), strings.Join(whereParts, " AND "))
+}
+
+func sqlStringLiteralForPreview(driver, s string) string {
+	if driver == "postgres" {
+		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	}
+	// MySQL: 默认模式下反斜杠与单引号均需处理，便于复制到客户端执行
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "''")
+	return "'" + s + "'"
+}
+
+func formatSQLLiteralForPreview(driver string, v any) string {
+	if v == nil {
+		return "NULL"
+	}
+	switch t := v.(type) {
+	case bool:
+		if driver == "postgres" {
+			if t {
+				return "TRUE"
+			}
+			return "FALSE"
+		}
+		if t {
+			return "1"
+		}
+		return "0"
+	case int:
+		return strconv.Itoa(t)
+	case int32:
+		return strconv.FormatInt(int64(t), 10)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case uint:
+		return strconv.FormatUint(uint64(t), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(t), 10)
+	case uint64:
+		return strconv.FormatUint(t, 10)
+	case float32:
+		return strconv.FormatFloat(float64(t), 'g', -1, 32)
+	case float64:
+		return strconv.FormatFloat(t, 'g', -1, 64)
+	case []byte:
+		if len(t) == 0 {
+			if driver == "postgres" {
+				return "''::bytea"
+			}
+			return "X''"
+		}
+		h := strings.ToUpper(hex.EncodeToString(t))
+		if driver == "postgres" {
+			return "'\\x" + h + "'::bytea"
+		}
+		return "X'" + h + "'"
+	case string:
+		return sqlStringLiteralForPreview(driver, t)
+	case time.Time:
+		return sqlStringLiteralForPreview(driver, t.Format("2006-01-02 15:04:05.999999"))
+	default:
+		return sqlStringLiteralForPreview(driver, fmt.Sprint(t))
+	}
 }

@@ -90,6 +90,43 @@ body,
   cursor: pointer;
 }
 
+.tf-btn-icon-lg {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tf-icon-btn-size-lg);
+  height: var(--tf-icon-btn-size-lg);
+  min-width: var(--tf-touch-min);
+  min-height: var(--tf-touch-min);
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: var(--tf-btn-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgb(71 85 105);
+  cursor: pointer;
+}
+
+.tf-btn-icon-lg:hover:enabled {
+  background: rgb(241 245 249);
+}
+
+.tf-btn-icon-lg:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.tf-btn-icon-lg.tf-btn-icon-bordered {
+  border-color: rgb(226 232 240);
+  background: #fff;
+  color: rgb(51 65 85);
+}
+
+.tf-btn-icon-lg.tf-btn-icon-bordered:hover:enabled {
+  background: rgb(248 250 252);
+}
+
 .tf-btn-icon:hover:enabled {
   background: rgb(241 245 249);
 }

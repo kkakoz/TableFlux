@@ -17,6 +17,7 @@ import {
   type StudioSessionSnapshot,
   TableQueryRequest,
   TableSchemaRequest,
+  UpdateRowsRequest,
   type VaultStatus,
   type WorkspaceGroup,
 } from "../bindings/changeme";
@@ -53,6 +54,8 @@ export const api = {
   executeSQL: (req: ExecuteSQLRequest | Record<string, unknown>) => DatabaseService.ExecuteSQL(req as any),
   queryTablePage: (req: TableQueryRequest | Record<string, unknown>) =>
     DatabaseService.QueryTablePage(req instanceof TableQueryRequest ? req : new TableQueryRequest(req)) as Promise<QueryResultPage>,
+  previewUpdateRowsSQL: (req: UpdateRowsRequest | Record<string, unknown>) => DatabaseService.PreviewUpdateRowsSQL(req as any),
+  updateRows: (req: UpdateRowsRequest | Record<string, unknown>) => DatabaseService.UpdateRows(req as any),
   getSettings: () => SettingsService.GetSettings(),
   listDatabases: (connectionId: string) => DatabaseService.ListDatabases(connectionId),
   listTables: (connectionId: string, database: string, schema = "") =>
