@@ -21,7 +21,7 @@ export default function HeaderBar({ workspaceName, onOpenSettings }: Props) {
       </div>
       <button
         type="button"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+        className="tf-btn-toolbar gap-1.5 text-[12px] font-medium shadow-sm"
         onClick={onOpenSettings}
         title="设置"
       >

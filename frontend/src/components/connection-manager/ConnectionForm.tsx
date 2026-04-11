@@ -29,7 +29,7 @@ export default function ConnectionForm({
         <span className="text-slate-600">连接名称</span>
         <input
           autoFocus={autoFocus}
-          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-900 outline-none ring-blue-500/0 transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+          className="tf-control text-[13px] text-slate-900"
           value={values.name}
           onChange={(e) => onChange({ ...values, name: e.target.value })}
           placeholder="例如：本地 MySQL"
@@ -40,7 +40,7 @@ export default function ConnectionForm({
       <label className="flex flex-col gap-1">
         <span className="text-slate-600">数据库类型</span>
         <select
-          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+          className="tf-control text-slate-900"
           value={values.driver}
           onChange={(e) => {
             const d = e.target.value as "mysql" | "postgres";
@@ -60,7 +60,7 @@ export default function ConnectionForm({
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-slate-600">主机</span>
           <input
-            className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+            className="tf-control min-w-0"
             value={values.host}
             onChange={(e) => onChange({ ...values, host: e.target.value })}
             placeholder="127.0.0.1"
@@ -69,7 +69,7 @@ export default function ConnectionForm({
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-slate-600">端口</span>
           <input
-            className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+            className="tf-control min-w-0"
             type="number"
             value={values.port}
             onChange={(e) => onChange({ ...values, port: Number(e.target.value) || 0 })}
@@ -81,7 +81,7 @@ export default function ConnectionForm({
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-slate-600">用户名</span>
           <input
-            className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+            className="tf-control min-w-0"
             value={values.user}
             onChange={(e) => onChange({ ...values, user: e.target.value })}
             autoComplete="username"
@@ -90,7 +90,7 @@ export default function ConnectionForm({
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-slate-600">密码</span>
           <input
-            className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+            className="tf-control min-w-0"
             type="password"
             value={values.password}
             onChange={(e) => onChange({ ...values, password: e.target.value })}
@@ -103,7 +103,7 @@ export default function ConnectionForm({
       <label className="flex flex-col gap-1">
         <span className="text-slate-600">默认数据库</span>
         <input
-          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+          className="tf-control"
           value={values.defaultDb}
           onChange={(e) => onChange({ ...values, defaultDb: e.target.value })}
           placeholder="可选"
@@ -113,7 +113,7 @@ export default function ConnectionForm({
       <label className="flex flex-col gap-1">
         <span className="text-slate-600">环境标签</span>
         <select
-          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+          className="tf-control text-slate-900"
           value={values.env}
           onChange={(e) =>
             onChange({ ...values, env: e.target.value as EnvOpt })
@@ -129,7 +129,7 @@ export default function ConnectionForm({
         <button
           type="button"
           id={advId}
-          className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left text-[12px] font-medium text-slate-700 hover:bg-slate-100/80"
+          className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-slate-700 hover:bg-slate-100/80"
           onClick={onToggleAdvanced}
           aria-expanded={advancedOpen}
         >
@@ -141,7 +141,7 @@ export default function ConnectionForm({
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-slate-600">字符集</span>
               <input
-                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                className="tf-control text-[12px]"
                 value={values.charset}
                 onChange={(e) => onChange({ ...values, charset: e.target.value })}
                 placeholder="utf8mb4"
@@ -150,7 +150,7 @@ export default function ConnectionForm({
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-slate-600">SSL</span>
               <select
-                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                className="tf-control text-[12px]"
                 value={values.sslMode}
                 onChange={(e) => onChange({ ...values, sslMode: e.target.value })}
               >
@@ -162,7 +162,7 @@ export default function ConnectionForm({
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-slate-600">连接超时（秒）</span>
               <input
-                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                className="tf-control text-[12px]"
                 type="number"
                 min={1}
                 value={values.connectTimeoutSec}

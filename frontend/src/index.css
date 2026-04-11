@@ -62,11 +62,195 @@ body,
  */
 .tf-studio-object-tree,
 .tf-studio-tab-strip {
-  font-size: 12px;
-  line-height: 1.2;
+  font-size: 14px;
+  line-height: 1.25;
 }
 
 .tf-studio-object-tree button,
 .tf-studio-tab-strip button {
   font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* 紧凑工具栏按钮（Studio 顶栏/侧栏）；尺寸见 themes.css --tf-* */
+.tf-btn-icon {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tf-icon-btn-size);
+  height: var(--tf-icon-btn-size);
+  min-width: var(--tf-touch-min);
+  min-height: var(--tf-touch-min);
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: var(--tf-btn-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgb(71 85 105);
+  cursor: pointer;
+}
+
+.tf-btn-icon-lg {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tf-icon-btn-size-lg);
+  height: var(--tf-icon-btn-size-lg);
+  min-width: var(--tf-touch-min);
+  min-height: var(--tf-touch-min);
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: var(--tf-btn-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgb(71 85 105);
+  cursor: pointer;
+}
+
+.tf-btn-icon-lg:hover:enabled {
+  background: rgb(241 245 249);
+}
+
+.tf-btn-icon-lg:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.tf-btn-icon-lg.tf-btn-icon-bordered {
+  border-color: rgb(226 232 240);
+  background: #fff;
+  color: rgb(51 65 85);
+}
+
+.tf-btn-icon-lg.tf-btn-icon-bordered:hover:enabled {
+  background: rgb(248 250 252);
+}
+
+.tf-btn-icon:hover:enabled {
+  background: rgb(241 245 249);
+}
+
+.tf-btn-icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.tf-btn-icon-bordered {
+  border-color: rgb(226 232 240);
+  background: #fff;
+  color: rgb(51 65 85);
+}
+
+.tf-btn-icon-bordered:hover:enabled {
+  background: rgb(248 250 252);
+}
+
+.tf-btn-toolbar {
+  box-sizing: border-box;
+  display: inline-flex;
+  height: var(--tf-icon-btn-size);
+  min-height: var(--tf-touch-min);
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--tf-btn-radius);
+  border: 1px solid rgb(226 232 240);
+  background: #fff;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: rgb(51 65 85);
+  cursor: pointer;
+}
+
+.tf-btn-toolbar:hover:enabled {
+  background: rgb(248 250 252);
+}
+
+.tf-btn-toolbar-play {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(5 150 105);
+}
+
+.tf-btn-toolbar-play:hover:enabled {
+  background: transparent;
+  color: rgb(5 150 105);
+}
+
+.tf-btn-toolbar-play:disabled {
+  color: rgb(203 213 225);
+}
+
+/* 紧凑表单控件（连接管理、弹窗等）；尺寸见 themes.css --tf-input-* */
+.tf-control {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--tf-input-min-h);
+  padding: 0 var(--tf-input-padding-x);
+  border-radius: var(--tf-btn-radius);
+  border: 1px solid rgb(226 232 240);
+  background: #fff;
+  color: rgb(15 23 42);
+  font-size: var(--tf-btn-font-size);
+  line-height: 1.25;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.tf-control::placeholder {
+  color: rgb(148 163 184);
+}
+
+.tf-control:focus {
+  border-color: rgb(96 165 250);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.tf-control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+select.tf-control {
+  cursor: pointer;
+}
+
+/* Studio 顶栏等与工具栏同高的下拉框（略大于表搜索框，便于辨认连接名） */
+.tf-control.tf-control-sm {
+  min-height: var(--tf-icon-btn-size);
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.tf-btn-primary {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: var(--tf-btn-min-h);
+  padding: 0 12px;
+  border-radius: var(--tf-btn-radius);
+  border: 1px solid rgb(37 99 235);
+  background: rgb(37 99 235);
+  color: #fff;
+  font-size: var(--tf-btn-font-size);
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.tf-btn-primary:hover:enabled {
+  background: rgb(29 78 216);
+  border-color: rgb(29 78 216);
+}
+
+.tf-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

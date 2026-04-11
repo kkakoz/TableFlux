@@ -70,7 +70,7 @@ export default function GroupEditModal({ open, group, onClose, onSaved, onError 
           </div>
           <button
             type="button"
-            className="rounded-md p-1 text-slate-500 hover:bg-slate-100"
+            className="tf-btn-icon text-slate-500 hover:text-slate-800"
             onClick={onClose}
             title="关闭"
           >
@@ -82,7 +82,7 @@ export default function GroupEditModal({ open, group, onClose, onSaved, onError 
             <span className="text-[12px] text-slate-600">分组名称</span>
             <input
               autoFocus
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+              className="tf-control text-[13px]"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="分组名称"
@@ -115,7 +115,7 @@ export default function GroupEditModal({ open, group, onClose, onSaved, onError 
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
             <button
               type="button"
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50"
+              className="tf-btn-toolbar text-[13px] text-slate-700"
               onClick={onClose}
               disabled={busy}
             >
@@ -123,7 +123,7 @@ export default function GroupEditModal({ open, group, onClose, onSaved, onError 
             </button>
             <button
               type="submit"
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="tf-btn-primary text-[13px] disabled:opacity-50"
               disabled={busy || !name.trim()}
             >
               保存

@@ -1,0 +1,32 @@
+schema: spec-driven
+
+# 生成 OpenSpec 产物时展示给 AI 的项目上下文
+context: |
+  项目名称：TableFlux — 桌面端数据库客户端（Wails 应用）。
+
+  架构：
+  - 后端：Go（go 1.25），入口 main.go；业务通过 Wails v3 application.Service 暴露给前端。
+  - 前端：frontend/ 目录，React 18 + TypeScript + Vite 5；样式 Tailwind CSS 4；与 Go 通过 @wailsio/runtime 绑定交互。
+  - 前端关键依赖：@glideapps/glide-data-grid（表格）、@monaco-editor/react / monaco-editor（编辑器）、lucide-react（图标）。
+
+  数据与集成：
+  - 数据库访问：PostgreSQL（jackc/pgx/v5）、MySQL（go-sql-driver/mysql）；本地存储与配置见现有 DataStore / 各 *Service 实现。
+  - 后端领域概念示例：Secret、Workspace、Database、Studio 窗口、Task、AI、Settings 等服务模块。
+
+  开发与构建：
+  - 开发：`wails3 dev`（前后端热重载以项目文档为准）。
+  - 前端构建产物嵌入：`//go:embed all:frontend/dist`。
+  - Go 模块名当前为 go.mod 中的 module 声明；新增包与导入需与之保持一致。
+
+  约定：
+  - 实现功能时优先沿用现有 Service 分层与前端组件结构；跨前后端变更需同时考虑 Wails 绑定与 TypeScript 类型。
+  - 提交说明使用中文（项目约定）。
+
+# 可按需为特定产物追加规则
+rules:
+  proposal:
+    - 涉及 UI 时说明是否仅改 frontend/；涉及持久化或外部系统时说明对应 Go Service 与数据流。
+  design:
+    - 新能力需标明前后端边界（Wails 方法 / 事件）及是否触碰数据库驱动或密钥存储。
+  tasks:
+    - 任务粒度便于在单会话内完成；跨 frontend 与 Go 的任务拆成可独立验证的步骤。

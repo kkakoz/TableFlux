@@ -111,14 +111,14 @@ export default function WorkspaceSidebar({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">工作区</div>
       <form className="flex gap-1.5" onSubmit={onCreateGroup}>
         <input
-          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15"
+          className="tf-control min-w-0 flex-1 text-[12px]"
           value={groupName}
           onChange={(e) => onGroupNameChange(e.target.value)}
           placeholder="新分组…"
         />
         <button
           type="submit"
-          className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+          className="tf-btn-toolbar shrink-0 px-2 text-[12px] font-medium"
         >
           新增
         </button>
@@ -158,7 +158,7 @@ export default function WorkspaceSidebar({
 
       <button
         type="button"
-        className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-[12px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+        className="tf-btn-primary w-full shrink-0 justify-center text-[12px] disabled:cursor-not-allowed disabled:opacity-40"
         disabled={!canOpenWorkbench}
         onClick={onOpenWorkbench}
       >

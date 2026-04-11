@@ -45,6 +45,7 @@ export {
     TableSchema,
     TableSchemaRequest,
     UpdateRowsRequest,
+    UpdateRowsSQLPreviewResponse,
     VaultStatus,
     WorkspaceGroup
 } from "./models.js";

@@ -1240,6 +1240,34 @@ export class UpdateRowsRequest {
     }
 }
 
+/**
+ * UpdateRowsSQLPreviewResponse 与 UpdateRows 请求一致时生成的可展示 UPDATE 文本（按方言转义字面量）。
+ */
+export class UpdateRowsSQLPreviewResponse {
+    "statements": string[];
+
+    /** Creates a new UpdateRowsSQLPreviewResponse instance. */
+    constructor($$source: Partial<UpdateRowsSQLPreviewResponse> = {}) {
+        if (!("statements" in $$source)) {
+            this["statements"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new UpdateRowsSQLPreviewResponse instance from a string or object.
+     */
+    static createFrom($$source: any = {}): UpdateRowsSQLPreviewResponse {
+        const $$createField0_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("statements" in $$parsedSource) {
+            $$parsedSource["statements"] = $$createField0_0($$parsedSource["statements"]);
+        }
+        return new UpdateRowsSQLPreviewResponse($$parsedSource as Partial<UpdateRowsSQLPreviewResponse>);
+    }
+}
+
 export class VaultStatus {
     "hasMasterPassword": boolean;
     "unlocked": boolean;
