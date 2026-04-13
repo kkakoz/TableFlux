@@ -137,6 +137,22 @@ function mergeTableRowsForDisplay(
   });
 }
 
+/** 仅包含主键列 + 已修改列，供 UPDATE 只 SET 实际变更的字段 */
+function buildUpdateRowPayload(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  keyColumns: string[],
+): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const k of keyColumns) {
+    row[k] = base[k];
+  }
+  for (const k of Object.keys(patch)) {
+    row[k] = patch[k];
+  }
+  return row;
+}
+
 const createSqlTab = (index: number, connectionId: string, database: string): WorkbenchTab => ({
   id: crypto.randomUUID(),
   title: `查询 ${index}`,
@@ -269,6 +285,9 @@ const GRID_ROW_HEIGHT = 28;
 const GRID_HEADER_HEIGHT = 30;
 /** 结果表 NULL 占位（与 slate-400 接近，区别于正文） */
 const GRID_NULL_TEXT = "#94a3b8";
+/** 未提交编辑单元格背景（与表格浅色主题协调） */
+const GRID_DIRTY_CELL_BG = "#fffbeb";
+const GRID_DIRTY_CELL_BG_MEDIUM = "#fef3c7";
 const ROW_MARKER_WIDTH = 42;
 
 function App() {
@@ -961,7 +980,7 @@ function StudioView({ groupId }: { groupId: string }) {
       if (!patch || Object.keys(patch).length === 0) continue;
       const base = orig[i];
       if (!base) continue;
-      rows.push({ ...base, ...patch });
+      rows.push(buildUpdateRowPayload(base, patch, pk));
     }
     if (rows.length === 0) {
       setError("没有可提交的修改");
@@ -1023,7 +1042,7 @@ function StudioView({ groupId }: { groupId: string }) {
       if (!patch || Object.keys(patch).length === 0) continue;
       const base = orig[i];
       if (!base) continue;
-      rows.push({ ...base, ...patch });
+      rows.push(buildUpdateRowPayload(base, patch, pk));
     }
     if (pk.length === 0 || rows.length === 0) return;
     patchActiveTableTab((t) => ({ ...t, tableEditApplyLoading: true }));
@@ -2212,6 +2231,7 @@ function StudioView({ groupId }: { groupId: string }) {
                             editable={(activeTab.tablePrimaryKey?.length ?? 0) > 0}
                             primaryKeyColumns={activeTab.tablePrimaryKey ?? []}
                             onCellValueChange={handleTableCellEdit}
+                            dirtyFields={activeTab.tableEditDirtyRows}
                           />
                         </div>
                       ) : (
@@ -2526,6 +2546,8 @@ function VirtualResultGrid({
   editable = false,
   primaryKeyColumns = [],
   onCellValueChange,
+  /** 行索引 → 已修改列名→值（仅用于背景高亮，与表编辑 dirty 一致） */
+  dirtyFields,
 }: {
   columns: string[];
   /** 与 columns 同序；缺省时不提供「查看完整内容」 */
@@ -2542,6 +2564,7 @@ function VirtualResultGrid({
   editable?: boolean;
   primaryKeyColumns?: string[];
   onCellValueChange?: (rowIndex: number, columnName: string, value: unknown) => void;
+  dirtyFields?: Record<number, Record<string, unknown>>;
 }) {
   const PAGE_SIZE = 10000;
   const [page, setPage] = useState(1);
@@ -2691,6 +2714,12 @@ function VirtualResultGrid({
       const raw = colName ? pageRows[row]?.[colName] : undefined;
       const isPk = Boolean(colName && pkSet.has(colName));
       const canEdit = Boolean(editable && onCellValueChange && colName && !isPk);
+      const isDirtyCell = Boolean(
+        colName && dirtyFields && dirtyFields[row] && Object.prototype.hasOwnProperty.call(dirtyFields[row], colName),
+      );
+      const dirtyTheme = isDirtyCell
+        ? { bgCell: GRID_DIRTY_CELL_BG, bgCellMedium: GRID_DIRTY_CELL_BG_MEDIUM }
+        : undefined;
 
       if (colName && (raw === null || raw === undefined)) {
         return {
@@ -2703,6 +2732,7 @@ function VirtualResultGrid({
             textDark: GRID_NULL_TEXT,
             textMedium: GRID_NULL_TEXT,
             textLight: GRID_NULL_TEXT,
+            ...dirtyTheme,
           },
         };
       }
@@ -2713,9 +2743,10 @@ function VirtualResultGrid({
         readonly: !canEdit,
         displayData: value,
         data: value,
+        themeOverride: dirtyTheme,
       };
     };
-  }, [columns, pageRows, displayTimezone, editable, onCellValueChange, pkSet]);
+  }, [columns, pageRows, displayTimezone, editable, onCellValueChange, pkSet, dirtyFields]);
 
   const copySelection = async () => {
     try {

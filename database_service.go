@@ -557,7 +557,7 @@ func (s *DatabaseService) PreviewUpdateRowsSQL(req UpdateRowsRequest) (UpdateRow
 		if len(keys) == 0 {
 			return UpdateRowsSQLPreviewResponse{}, errors.New("no columns to update (only key columns present)")
 		}
-		stmts = append(stmts, buildUpdateStatementPreview(conn.Driver, req.Schema, req.Table, req.KeyColumns, row, keys))
+		stmts = append(stmts, buildUpdateStatementPreview(conn.Driver, req.Schema, req.Table, req.KeyColumns, row, keys)+";")
 	}
 	return UpdateRowsSQLPreviewResponse{Statements: stmts}, nil
 }
