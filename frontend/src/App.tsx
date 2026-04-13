@@ -2779,7 +2779,8 @@ function VirtualResultGrid({
           headerHeight={GRID_HEADER_HEIGHT}
           rowMarkers={{ kind: "number", width: ROW_MARKER_WIDTH, startIndex: markerStart }}
           rowSelectionMode="multi"
-          rangeSelect={editable ? "cell" : "rect"}
+          /** cell=仅单格；rect=仅一块矩形；multi-rect 支持多块/Shift 扩展多选（查询结果与可编辑表均需） */
+          rangeSelect="multi-rect"
           smoothScrollX
           smoothScrollY
           overscrollX={16}
