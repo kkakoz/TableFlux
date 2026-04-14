@@ -558,6 +558,12 @@ function StudioView({ groupId }: { groupId: string }) {
   const activeConnMeta = connections.find((c) => c.id === activeConnectionId);
   const currentGroupName = allGroups.find((g) => g.id === groupId)?.name || groupId;
   const otherWorkbenches = useMemo(() => allGroups.filter((g) => g.id !== groupId), [allGroups, groupId]);
+
+  useEffect(() => {
+    if (currentGroupName) {
+      document.title = currentGroupName;
+    }
+  }, [currentGroupName]);
   const allDbNames = useMemo(() => dbTree.map((d) => d.name), [dbTree]);
   const visibilitySetForModal = visibleDbSet ?? new Set(allDbNames);
   const showSqlResultPane = activeTab?.type === "sql" && Boolean(activeTabResult || activeTabError);

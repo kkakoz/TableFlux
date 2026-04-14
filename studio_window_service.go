@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 type StudioWindowService struct {
@@ -31,12 +33,23 @@ func (s *StudioWindowService) OpenGroupWindow(groupID string) error {
 	}
 	name := "studio-" + groupID
 	if w, ok := app.Window.GetByName(name); ok {
+		// 工作台已存在，确保主窗口隐藏并聚焦工作台
+		if mainWin, ok2 := app.Window.GetByName("main"); ok2 {
+			mainWin.Hide()
+		}
 		w.Focus()
 		return nil
 	}
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+
+	// 用分组名作窗口标题
+	groupName := groupID
+	if group, ok := s.store.GetGroup(groupID); ok {
+		groupName = group.Name
+	}
+
+	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             name,
-		Title:            "TableFlux Studio",
+		Title:            groupName,
 		Width:            1440,
 		Height:           900,
 		MinWidth:         1024,
@@ -44,6 +57,29 @@ func (s *StudioWindowService) OpenGroupWindow(groupID string) error {
 		BackgroundColour: application.NewRGB(10, 16, 24),
 		URL:              "/?studio=1&groupId=" + groupID,
 	})
+
+	// 隐藏连接管理主窗口
+	if mainWin, ok := app.Window.GetByName("main"); ok {
+		mainWin.Hide()
+	}
+
+	// 工作台关闭时，若已无其他工作台窗口则重新显示连接管理界面
+	w.OnWindowEvent(events.Common.WindowClosing, func(_ *application.WindowEvent) {
+		hasOtherStudio := false
+		for _, win := range app.Window.GetAll() {
+			if win.Name() != name && strings.HasPrefix(win.Name(), "studio-") {
+				hasOtherStudio = true
+				break
+			}
+		}
+		if !hasOtherStudio {
+			if mainWin, ok := app.Window.GetByName("main"); ok {
+				mainWin.Show()
+				mainWin.Focus()
+			}
+		}
+	})
+
 	return nil
 }
 
