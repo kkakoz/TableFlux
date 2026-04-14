@@ -37,6 +37,7 @@ func (s *StudioWindowService) OpenGroupWindow(groupID string) error {
 		if mainWin, ok2 := app.Window.GetByName("main"); ok2 {
 			mainWin.Hide()
 		}
+		w.Fullscreen()
 		w.Focus()
 		return nil
 	}
@@ -54,6 +55,7 @@ func (s *StudioWindowService) OpenGroupWindow(groupID string) error {
 		Height:           900,
 		MinWidth:         1024,
 		MinHeight:        640,
+		StartState:       application.WindowStateFullscreen,
 		BackgroundColour: application.NewRGB(10, 16, 24),
 		URL:              "/?studio=1&groupId=" + groupID,
 	})
