@@ -52,6 +52,7 @@ export const api = {
   focusMainWindow: () => StudioWindowService.FocusMainWindow(),
 
   executeSQL: (req: ExecuteSQLRequest | Record<string, unknown>) => DatabaseService.ExecuteSQL(req as any),
+  cancelRunningQuery: () => DatabaseService.CancelRunningQuery(),
   queryTablePage: (req: TableQueryRequest | Record<string, unknown>) =>
     DatabaseService.QueryTablePage(req instanceof TableQueryRequest ? req : new TableQueryRequest(req)) as Promise<QueryResultPage>,
   previewUpdateRowsSQL: (req: UpdateRowsRequest | Record<string, unknown>) => DatabaseService.PreviewUpdateRowsSQL(req as any),

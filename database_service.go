@@ -50,9 +50,10 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 	if strings.TrimSpace(req.SQL) == "" {
 		return SQLExecutionResult{}, errors.New("sql is required")
 	}
-	if req.RowLimit <= 0 {
+	if req.RowLimit == 0 {
 		req.RowLimit = s.defaultRLS
 	}
+	// RowLimit < 0 表示不限制行数
 	if req.TimeoutMs <= 0 {
 		req.TimeoutMs = 30000
 	}
@@ -114,7 +115,7 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 		resultRows := make([]map[string]any, 0)
 		truncated := false
 		for rows.Next() {
-			if len(resultRows) >= req.RowLimit {
+			if req.RowLimit > 0 && len(resultRows) >= req.RowLimit {
 				truncated = true
 				break
 			}

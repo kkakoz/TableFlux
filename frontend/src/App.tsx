@@ -30,6 +30,7 @@ import {
   Table2,
   XCircle,
   X,
+  Square,
 } from "lucide-react";
 import { api } from "./api";
 import type {
@@ -86,6 +87,8 @@ type WorkbenchTab = {
   tableQueryLoading?: boolean;
   /** 查询标签：正在执行 SQL 或 EXPLAIN */
   sqlResultLoading?: boolean;
+  /** 当前正在执行的 SQL 文本（用于 gutter 匹配高亮） */
+  runningSQL?: string;
 
   /** SQL 结果分页（客户端切片） */
   sqlGridPage?: number;
@@ -285,6 +288,32 @@ const GRID_ROW_HEIGHT = 28;
 const GRID_HEADER_HEIGHT = 30;
 /** 结果表 NULL 占位（与 slate-400 接近，区别于正文） */
 const GRID_NULL_TEXT = "#94a3b8";
+
+const CONN_TREE_STORAGE_PREFIX = "tableflux.studio.conn_tree:";
+
+function connTreeStorageKey(connectionId: string) {
+  return `${CONN_TREE_STORAGE_PREFIX}${connectionId}`;
+}
+
+type ConnTreeSnapshot = {
+  selectedDatabase: string;
+  expandedDatabases: string[];
+};
+
+function readConnTreeSnapshot(connectionId: string): ConnTreeSnapshot | null {
+  try {
+    const raw = localStorage.getItem(connTreeStorageKey(connectionId));
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Partial<ConnTreeSnapshot>;
+    const selectedDatabase = typeof o.selectedDatabase === "string" ? o.selectedDatabase : "";
+    const expandedDatabases = Array.isArray(o.expandedDatabases)
+      ? o.expandedDatabases.filter((x): x is string => typeof x === "string")
+      : [];
+    return { selectedDatabase, expandedDatabases };
+  } catch {
+    return null;
+  }
+}
 /** 未提交编辑单元格背景（与表格浅色主题协调） */
 const GRID_DIRTY_CELL_BG = "#fffbeb";
 const GRID_DIRTY_CELL_BG_MEDIUM = "#fef3c7";
@@ -376,6 +405,14 @@ function StudioView({ groupId }: { groupId: string }) {
   /** 仅用于「库名列表变化」时合并新库进可见集；勿随 dbTree 引用变化而重置（展开/收起会改 dbTree） */
   const visibleDbNamesKeyRef = useRef<string>("");
   const visibleDbSyncConnIdRef = useRef<string | null>(null);
+  /** 当前 `dbTree` 对应的连接；与 `activeConnectionId` 不一致时不写入 localStorage（避免切换连接瞬间串数据） */
+  const treeOwnerConnRef = useRef<string>("");
+  /** 分组会话恢复的标签页首库，供首次拉取对象树且尚无 conn_tree 存档时对齐选中库 */
+  const sessionPreferredDbRef = useRef<string>("");
+  const activeConnectionIdRef = useRef(activeConnectionId);
+  useEffect(() => {
+    activeConnectionIdRef.current = activeConnectionId;
+  }, [activeConnectionId]);
 
   const databaseTabKey = `${activeConnectionId}::${selectedDatabase || "__none__"}`;
   const visibleTabs = tabsByDatabase[databaseTabKey] ?? [];
@@ -585,9 +622,12 @@ function StudioView({ groupId }: { groupId: string }) {
           error: "",
         }));
         const defaultDb = restoredTabs[0]?.contextDb || "";
+        sessionPreferredDbRef.current = defaultDb;
         const key = `${initialConn}::${defaultDb || "__none__"}`;
         setTabsByDatabase({ [key]: restoredTabs });
         setActiveTabByDatabase({ [key]: restoredTabs[0]?.id || "" });
+      } else {
+        sessionPreferredDbRef.current = "";
       }
       setActiveConnectionId(initialConn);
       setSourceGroupId(groupId);
@@ -690,33 +730,50 @@ function StudioView({ groupId }: { groupId: string }) {
     saveSession(visibleTabs, activeConnectionId);
   }, [visibleTabs, activeConnectionId]);
 
-  const reloadDbTree = async () => {
-    if (!activeConnectionId) {
+  const reloadDbTree = useCallback(async () => {
+    const connId = activeConnectionId;
+    if (!connId) {
+      treeOwnerConnRef.current = "";
       setDbTree([]);
       setSelectedDatabase("");
       return;
     }
     try {
-      const dbs = await api.listDatabases(activeConnectionId);
+      const dbs = await api.listDatabases(connId);
+      if (connId !== activeConnectionIdRef.current) return;
       const names = dbs.map((d: any) => d.name);
+      const nameSet = new Set(names);
+      const snap = readConnTreeSnapshot(connId);
+      const expandedSet = new Set((snap?.expandedDatabases ?? []).filter((n) => nameSet.has(n)));
+
+      let nextSelected = "";
+      const pref = sessionPreferredDbRef.current;
+      if (pref && nameSet.has(pref)) {
+        nextSelected = pref;
+        sessionPreferredDbRef.current = "";
+      } else if (snap?.selectedDatabase && nameSet.has(snap.selectedDatabase)) {
+        nextSelected = snap.selectedDatabase;
+      }
+
       setDbTree(
         names.map((name) => ({
           name,
-          expanded: false,
+          expanded: expandedSet.has(name),
           loaded: false,
           tables: [],
-        }))
+        })),
       );
-      setSelectedDatabase("");
+      setSelectedDatabase(nextSelected);
+      treeOwnerConnRef.current = connId;
       setError("");
     } catch (e) {
       setError(String(e));
     }
-  };
+  }, [activeConnectionId]);
 
   useEffect(() => {
     void reloadDbTree();
-  }, [activeConnectionId, connections]);
+  }, [reloadDbTree, connections]);
 
   const dbNamesKey = useMemo(() => dbTree.map((d) => d.name).sort().join("|"), [dbTree]);
 
@@ -809,20 +866,47 @@ function StudioView({ groupId }: { groupId: string }) {
     visibleDbNamesKeyRef.current = dbNamesKey;
   };
 
-  const loadTablesForDB = async (dbName: string) => {
-    if (!activeConnectionId || !dbName) return;
-    const current = dbTree.find((d) => d.name === dbName);
-    if (current?.loaded) return;
+  const loadTablesForDB = useCallback(
+    async (dbName: string) => {
+      const connId = activeConnectionId;
+      if (!connId || !dbName) return;
+      const current = dbTree.find((d) => d.name === dbName);
+      if (current?.loaded) return;
+      try {
+        const list = await api.listTables(connId, dbName, "");
+        if (connId !== activeConnectionIdRef.current) return;
+        const tableNames = (list || []).map((t: any) => t.name);
+        setDbTree((prev) =>
+          prev.map((d) => (d.name === dbName ? { ...d, loaded: true, tables: tableNames } : d)),
+        );
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [activeConnectionId, dbTree],
+  );
+
+  useEffect(() => {
+    if (!activeConnectionId || treeOwnerConnRef.current !== activeConnectionId) return;
     try {
-      const list = await api.listTables(activeConnectionId, dbName, "");
-      const tableNames = (list || []).map((t: any) => t.name);
-      setDbTree((prev) =>
-        prev.map((d) => (d.name === dbName ? { ...d, loaded: true, tables: tableNames } : d))
+      const expandedDatabases = dbTree.filter((d) => d.expanded).map((d) => d.name);
+      localStorage.setItem(
+        connTreeStorageKey(activeConnectionId),
+        JSON.stringify({ selectedDatabase, expandedDatabases }),
       );
-    } catch (e) {
-      setError(String(e));
+    } catch {
+      /* ignore */
     }
-  };
+  }, [activeConnectionId, selectedDatabase, dbTree]);
+
+  useEffect(() => {
+    if (!activeConnectionId || treeOwnerConnRef.current !== activeConnectionId) return;
+    for (const db of dbTree) {
+      if (db.expanded && !db.loaded) {
+        void loadTablesForDB(db.name);
+      }
+    }
+  }, [activeConnectionId, dbTree, loadTablesForDB]);
 
   useEffect(() => {
     if (!selectedDatabase) return;
@@ -1121,7 +1205,7 @@ function StudioView({ groupId }: { groupId: string }) {
     const trimmed = (sql || "").trim();
     if (!trimmed) return;
     upsertDatabaseTabs(selectedDatabase, (list) =>
-      list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: true } : t))
+      list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: true, runningSQL: trimmed } : t))
     );
     try {
       const r = await api.executeSQL({
@@ -1129,7 +1213,7 @@ function StudioView({ groupId }: { groupId: string }) {
         database: selectedDatabase,
         sql: trimmed,
         mode,
-        rowLimit: 50000,
+        rowLimit: -1,
         timeoutMs: 30000,
       });
       pushSqlHistory(trimmed);
@@ -1137,7 +1221,7 @@ function StudioView({ groupId }: { groupId: string }) {
       upsertDatabaseTabs(selectedDatabase, (list) =>
         list.map((t) =>
           t.id === activeTab.id
-            ? { ...t, sqlResultLoading: false, result: r, error: "", lastExecutedSql: trimmed, sqlGridPage: 1 }
+            ? { ...t, sqlResultLoading: false, runningSQL: "", result: r, error: "", lastExecutedSql: trimmed, sqlGridPage: 1 }
             : t,
         )
       );
@@ -1146,7 +1230,7 @@ function StudioView({ groupId }: { groupId: string }) {
       upsertDatabaseTabs(selectedDatabase, (list) =>
         list.map((t) =>
           t.id === activeTab.id
-            ? { ...t, sqlResultLoading: false, error: String(e), result: null, lastExecutedSql: trimmed }
+            ? { ...t, sqlResultLoading: false, runningSQL: "", error: String(e), result: null, lastExecutedSql: trimmed }
             : t,
         )
       );
@@ -1171,6 +1255,25 @@ function StudioView({ groupId }: { groupId: string }) {
     const parts = splitStatementsBySemicolon(sqlText);
     const mode = parts.length > 1 ? "batch" : "single";
     await executeSqlForActiveTab(sqlText, mode);
+  };
+
+  /** 停止当前正在执行的 SQL。 */
+  const cancelCurrentQuery = async () => {
+    try {
+      await api.cancelRunningQuery();
+    } catch (_) {
+      // 忽略取消时的错误
+    } finally {
+      if (activeTab) {
+        upsertDatabaseTabs(selectedDatabase, (list) =>
+          list.map((t) =>
+            t.id === activeTab.id
+              ? { ...t, sqlResultLoading: false, runningSQL: "" }
+              : t,
+          )
+        );
+      }
+    }
   };
 
   /** Ctrl+R：执行选中或光标所在单条语句（始终 single，可展示结果表）。 */
@@ -1767,23 +1870,6 @@ function StudioView({ groupId }: { groupId: string }) {
               </button>
               <div className="ml-auto flex flex-wrap items-center gap-1.5">
                 <span className="hidden text-[11px] text-slate-400 lg:inline">Ctrl+L AI · Ctrl+R 执行当前语句</span>
-                <button
-                  type="button"
-                  className="tf-btn-icon tf-btn-toolbar-play"
-                  onClick={() => void runUnifiedSQL()}
-                  disabled={!activeConnectionId || activeTab?.type !== "sql"}
-                  title="执行选中或全文；多条语句时仅显示执行摘要 (与批量一致)"
-                >
-                  <Play className="h-4 w-4" fill="currentColor" strokeWidth={0} />
-                </button>
-                <button
-                  type="button"
-                  className="tf-btn-toolbar"
-                  onClick={() => void explain()}
-                  title="EXPLAIN 选中或全文（与工具栏执行一致）"
-                >
-                  计划
-                </button>
                 <button type="button" className="tf-btn-toolbar" onClick={addTab}>
                   新标签
                 </button>
@@ -1860,6 +1946,37 @@ function StudioView({ groupId }: { groupId: string }) {
                     : "flex min-h-0 flex-1 flex-col"
                 }
               >
+                {/* 编辑器上方工具栏 */}
+                <div className="flex shrink-0 items-center gap-1 border-b border-slate-200 bg-white px-2 py-1">
+                  <button
+                    type="button"
+                    className="tf-btn-icon tf-btn-toolbar-play"
+                    onClick={() => void runUnifiedSQL()}
+                    disabled={!activeConnectionId || (activeTab?.sqlResultLoading ?? false)}
+                    title="执行选中或全文；多条语句时仅显示执行摘要"
+                  >
+                    <Play className="h-4 w-4" fill="currentColor" strokeWidth={0} />
+                  </button>
+                  <button
+                    type="button"
+                    className="tf-btn-icon"
+                    onClick={() => void cancelCurrentQuery()}
+                    disabled={!(activeTab?.sqlResultLoading ?? false)}
+                    title="停止当前 SQL 执行"
+                    style={{ color: (activeTab?.sqlResultLoading ?? false) ? "rgb(220 38 38)" : undefined }}
+                  >
+                    <Square className="h-4 w-4" fill="currentColor" strokeWidth={0} />
+                  </button>
+                  <button
+                    type="button"
+                    className="tf-btn-toolbar"
+                    onClick={() => void explain()}
+                    disabled={!activeConnectionId || (activeTab?.sqlResultLoading ?? false)}
+                    title="EXPLAIN 选中或全文"
+                  >
+                    计划
+                  </button>
+                </div>
                 <div
                   className={
                     showSqlResultPane
@@ -1873,8 +1990,10 @@ function StudioView({ groupId }: { groupId: string }) {
                     value={activeTab?.sql ?? ""}
                     onChange={(v) => setTabSQL(v ?? "")}
                     onMount={onEditorMount}
-                    executeDisabled={!activeConnectionId}
+                    executeDisabled={!activeConnectionId || (activeTab?.sqlResultLoading ?? false)}
                     onExecuteStatement={(sql) => void executeSqlForActiveTab(sql, "single")}
+                    runningSQL={activeTab?.runningSQL}
+                    onStopStatement={() => void cancelCurrentQuery()}
                   />
                 </div>
               </div>
@@ -2017,7 +2136,7 @@ function StudioView({ groupId }: { groupId: string }) {
                                     </button>
                                   </div>
                                 </div>
-                                <div className="min-h-0 flex-1 overflow-hidden p-3">
+                                <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
                                   <VirtualResultGrid
                                     columns={activeTabResult.columns ?? Object.keys(activeTabResult.rows[0] ?? {})}
                                     columnTypes={activeTabResult.columnTypes}
