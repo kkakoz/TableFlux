@@ -55,6 +55,26 @@ body,
   background-color: #ffffff !important;
 }
 
+/* SQL 编辑器滚动条：更细、更稳，不抢视觉焦点 */
+.sql-editor-monaco .monaco-scrollable-element > .scrollbar.vertical {
+  width: 8px !important;
+  right: 2px !important;
+}
+
+.sql-editor-monaco .monaco-scrollable-element > .scrollbar.horizontal {
+  height: 8px !important;
+  bottom: 2px !important;
+}
+
+.sql-editor-monaco .monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.42) !important;
+}
+
+.sql-editor-monaco .monaco-scrollable-element > .scrollbar > .slider:hover {
+  background: rgba(100, 116, 139, 0.62) !important;
+}
+
 /*
  * public/style.css 中 `button, … { font: inherit }` 会让按钮继承 body 默认 ~16px，
  * Tailwind 的 text-[10px] 等在部分 WebView/层叠顺序下仍显大。

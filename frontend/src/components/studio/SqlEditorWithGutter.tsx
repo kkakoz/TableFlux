@@ -120,7 +120,7 @@ export default function SqlEditorWithGutter({
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-row">
       <div
-        className="sql-gutter-viewport shrink-0 overflow-hidden border-r border-slate-200/90 bg-[#f3f4f6]"
+        className="sql-gutter-viewport shrink-0 overflow-hidden border-r border-slate-200/90 bg-[#eceef1]"
         style={{ width: 52 }}
         aria-hidden
       >
@@ -136,18 +136,22 @@ export default function SqlEditorWithGutter({
             const lineNo = idx + 1;
             const stmt = stmtByStartLine.get(lineNo);
             const nextTop = resolvedPositions[idx + 1] ?? resolvedScrollHeight;
-            const rowHeight = Math.max(nextTop - top, lineHeight);
+            const rowHeight =
+              idx === resolvedPositions.length - 1
+                ? lineHeight
+                : Math.max(nextTop - top, lineHeight);
             return (
               <div
                 key={lineNo}
-                className="group/line absolute flex w-full items-stretch border-b border-transparent text-[11px] leading-none text-slate-400 hover:bg-slate-300/25"
+                className="group/line absolute flex w-full items-start border-b border-transparent text-[11px] leading-none text-slate-400 hover:bg-slate-300/25"
                 style={{ top, height: rowHeight }}
               >
-                <div className="flex min-w-0 flex-1 select-none items-center justify-end pr-1.5 tabular-nums text-slate-400">
+                <div className="flex min-w-0 flex-1 select-none items-start justify-end pr-1.5 pt-[2px] tabular-nums text-slate-400">
                   {lineNo}
                 </div>
-                <div className="flex w-[22px] shrink-0 items-center justify-center border-r border-slate-200/60 bg-[#eceef1] group-hover/line:bg-[#e4e6ea]">
-                  {stmt ? (() => {
+                <div className="flex w-[22px] shrink-0 items-start justify-center pt-[1px]">
+                  <div className="flex h-5 w-5 items-center justify-center">
+                    {stmt ? (() => {
                     const isAnyRunning = !!runningSQL;
                     const isThisRunning = isAnyRunning && stmt.sql.trim() === runningSQL?.trim();
                     if (isThisRunning) {
@@ -182,16 +186,15 @@ export default function SqlEditorWithGutter({
                         <Play className="h-3 w-3" fill="currentColor" strokeWidth={0} />
                       </button>
                     );
-                  })() : (
-                    <span className="h-3 w-3" />
-                  )}
+                    })() : null}
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
-      <div className="min-h-0 min-w-0 flex-1">
+      <div className="sql-editor-monaco min-h-0 min-w-0 flex-1">
         <Editor
           height={height}
           language="sql"
@@ -210,6 +213,13 @@ export default function SqlEditorWithGutter({
             lineDecorationsWidth: 4,
             lineNumbersMinChars: 0,
             padding: { top: 0, bottom: 0 },
+            scrollBeyondLastLine: false,
+            smoothScrolling: true,
+            scrollbar: {
+              verticalScrollbarSize: 8,
+              horizontalScrollbarSize: 8,
+              alwaysConsumeMouseWheel: false,
+            },
           }}
         />
       </div>

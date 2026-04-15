@@ -2735,6 +2735,26 @@ function StudioView({ groupId }: { groupId: string }) {
 
 type HeaderBounds = { x: number; y: number; width: number; height: number };
 
+function getDefaultColumnWidthByDbType(dbType: string | undefined): number {
+  const fallbackWidth = 180;
+  if (!dbType) return fallbackWidth;
+
+  const t = dbType.toLowerCase().trim();
+  if (!t) return fallbackWidth;
+
+  // 数值列通常较短，默认更紧凑。
+  if (/\b(tinyint|smallint|mediumint|int|integer|bigint|serial|year)\b/.test(t)) return 96;
+  if (/\b(decimal|numeric|float|double|real|money)\b/.test(t)) return 112;
+
+  // 仅需完整展示标准时间字符串（如 2026-04-15 10:30:59）。
+  if (t.includes("timestamp") || t.includes("datetime")) return 128;
+  if (/\b(date)\b/.test(t)) return 128;
+  if (/\b(time|timetz)\b/.test(t)) return 128;
+
+  if (/\b(bool|boolean|bit)\b/.test(t)) return 88;
+  return fallbackWidth;
+}
+
 function VirtualResultGrid({
   columns,
   columnTypes,
@@ -2798,10 +2818,15 @@ function VirtualResultGrid({
   }, [rows, columns.join("|"), serverMode]);
 
   const columnsSig = columns.join("|");
-  const defaultColWidth = 180;
+  const typeSig = (columnTypes ?? []).join("|");
+  const defaultColumnWidths = useMemo(
+    () => columns.map((_, i) => getDefaultColumnWidthByDbType(columnTypes?.[i])),
+    [columnsSig, typeSig],
+  );
+  const fallbackColWidth = 180;
   useEffect(() => {
-    setColumnWidths(columns.map(() => defaultColWidth));
-  }, [columnsSig]);
+    setColumnWidths(defaultColumnWidths);
+  }, [columnsSig, typeSig, defaultColumnWidths]);
 
   useEffect(() => {
     const el = gridHostRef.current;
@@ -2858,8 +2883,8 @@ function VirtualResultGrid({
 
   const resolvedColumnWidths = useMemo(() => {
     if (columnWidths.length === columns.length) return columnWidths;
-    return Array.from({ length: columns.length }, () => defaultColWidth);
-  }, [columnsSig, columnWidths, columns.length]);
+    return defaultColumnWidths;
+  }, [columnsSig, columnWidths, columns.length, defaultColumnWidths]);
 
   const openCellDetail = useCallback(
     (cell: Item) => {
@@ -2886,7 +2911,7 @@ function VirtualResultGrid({
   const gridColumns: GridColumn[] = useMemo(
     () =>
       columns.map((name, i) => {
-        const base: GridColumn = { title: name, id: name, width: resolvedColumnWidths[i] ?? defaultColWidth };
+        const base: GridColumn = { title: name, id: name, width: resolvedColumnWidths[i] ?? fallbackColWidth };
         if (serverMode && onSortOrder) {
           return {
             ...base,
@@ -2903,12 +2928,12 @@ function VirtualResultGrid({
     (_column: GridColumn, newSize: number, colIndex: number) => {
       setColumnWidths((prev) => {
         const len = columns.length;
-        const next = prev.length === len ? [...prev] : columns.map(() => defaultColWidth);
+        const next = prev.length === len ? [...prev] : [...defaultColumnWidths];
         next[colIndex] = newSize;
         return next;
       });
     },
-    [columns],
+    [columns, defaultColumnWidths],
   );
 
   const getCellContent = useMemo(() => {
