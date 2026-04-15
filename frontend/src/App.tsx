@@ -744,6 +744,9 @@ function StudioView({ groupId }: { groupId: string }) {
       setSelectedDatabase("");
       return;
     }
+    treeOwnerConnRef.current = "";
+    setDbTree([]);
+    setSelectedDatabase("");
     try {
       const dbs = await api.listDatabases(connId);
       if (connId !== activeConnectionIdRef.current) return;
@@ -810,6 +813,7 @@ function StudioView({ groupId }: { groupId: string }) {
       visibleDbNamesKeyRef.current = "";
       return;
     }
+    if (treeOwnerConnRef.current !== activeConnectionId) return;
     if (!dbNamesKey) return;
 
     if (visibleDbSyncConnIdRef.current !== activeConnectionId) {
