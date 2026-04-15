@@ -77,6 +77,7 @@ type ExecuteSQLRequest struct {
 	RowLimit     int    `json:"rowLimit"`
 	TimeoutMs    int    `json:"timeoutMs"`
 	Mode         string `json:"mode"`
+	RequestID    string `json:"requestId"`
 }
 
 type SQLExecutionResult struct {
@@ -92,13 +93,13 @@ type SQLExecutionResult struct {
 }
 
 type QueryResultPage struct {
-	Columns      []string         `json:"columns"`
-	ColumnTypes  []string         `json:"columnTypes,omitempty"`
-	Rows         []map[string]any `json:"rows"`
-	Total        int              `json:"total"`
-	Offset       int              `json:"offset"`
-	Limit        int              `json:"limit"`
-	DurationMs   int64            `json:"durationMs"`
+	Columns     []string         `json:"columns"`
+	ColumnTypes []string         `json:"columnTypes,omitempty"`
+	Rows        []map[string]any `json:"rows"`
+	Total       int              `json:"total"`
+	Offset      int              `json:"offset"`
+	Limit       int              `json:"limit"`
+	DurationMs  int64            `json:"durationMs"`
 }
 
 type TableQueryRequest struct {
@@ -116,6 +117,11 @@ type ExplainSQLRequest struct {
 	ConnectionID string `json:"connectionId"`
 	Database     string `json:"database"`
 	SQL          string `json:"sql"`
+	RequestID    string `json:"requestId"`
+}
+
+type CancelRunningQueryRequest struct {
+	RequestID string `json:"requestId"`
 }
 
 type InsertRowsRequest struct {

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -46,6 +45,9 @@ func (s *DatabaseService) ServiceName() string {
 func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult, error) {
 	if req.ConnectionID == "" {
 		return SQLExecutionResult{}, errors.New("connectionId is required")
+	}
+	if strings.TrimSpace(req.RequestID) == "" {
+		return SQLExecutionResult{}, errors.New("requestId is required")
 	}
 	if strings.TrimSpace(req.SQL) == "" {
 		return SQLExecutionResult{}, errors.New("sql is required")
@@ -92,9 +94,8 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(req.TimeoutMs)*time.Millisecond)
-	queryToken := uuid.NewString()
-	s.registerRunning(queryToken, cancel)
-	defer s.unregisterRunning(queryToken)
+	s.registerRunning(req.RequestID, cancel)
+	defer s.unregisterRunning(req.RequestID)
 
 	started := time.Now()
 	if selectLikePattern.MatchString(req.SQL) {
@@ -171,13 +172,18 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 	}, nil
 }
 
-func (s *DatabaseService) CancelRunningQuery() {
+func (s *DatabaseService) CancelRunningQuery(req CancelRunningQueryRequest) {
+	if strings.TrimSpace(req.RequestID) == "" {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, cancel := range s.running {
-		cancel()
+	cancel, ok := s.running[req.RequestID]
+	if !ok {
+		return
 	}
-	s.running = map[string]context.CancelFunc{}
+	cancel()
+	delete(s.running, req.RequestID)
 }
 
 func (s *DatabaseService) ListDatabases(connectionID string) ([]SchemaObject, error) {
@@ -345,6 +351,7 @@ func (s *DatabaseService) ExplainSQL(req ExplainSQLRequest) (SQLExecutionResult,
 		RowLimit:     500,
 		TimeoutMs:    30000,
 		Mode:         "single",
+		RequestID:    req.RequestID,
 	}
 	return s.ExecuteSQL(req2)
 }

@@ -89,6 +89,8 @@ type WorkbenchTab = {
   sqlResultLoading?: boolean;
   /** 当前正在执行的 SQL 文本（用于 gutter 匹配高亮） */
   runningSQL?: string;
+  /** 当前标签页最近一次发起、且仍允许回写状态的请求 ID */
+  runningRequestId?: string;
 
   /** SQL 结果分页（客户端切片） */
   sqlGridPage?: number;
@@ -168,6 +170,8 @@ const createSqlTab = (index: number, connectionId: string, database: string): Wo
   result: null,
   error: "",
 });
+
+const createRequestId = () => crypto.randomUUID();
 
 /** 为表名/列名加引号，避免保留字（如 order、user）导致语法错误 */
 function quoteSqlIdentifier(name: string, dialect: "mysql" | "postgres"): string {
@@ -338,7 +342,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const [tableFilter, setTableFilter] = useState("");
   const [tabsByDatabase, setTabsByDatabase] = useState<Record<string, WorkbenchTab[]>>({});
   const [activeTabByDatabase, setActiveTabByDatabase] = useState<Record<string, string>>({});
-  const [error, setError] = useState("");
+  const [, setError] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(272);
   const [editorHeight, setEditorHeight] = useState(340);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -451,18 +455,13 @@ function StudioView({ groupId }: { groupId: string }) {
       opts: { offset: number; orderBy: string; orderDesc: boolean },
     ) => {
       if (!activeConnectionId) return;
-      const key = `${activeConnectionId}::${dbName || "__none__"}`;
-      setTabsByDatabase((prev) => {
-        const list = prev[key] ?? [];
-        return {
-          ...prev,
-          [key]: list.map((t) => (t.id === tabId ? { ...t, tableQueryLoading: true } : t)),
-        };
-      });
+      const connectionId = activeConnectionId;
+      const requestId = createRequestId();
+      beginTableTabRequest(connectionId, dbName, tabId, requestId);
       try {
         let pkCols: string[] | undefined;
         try {
-          const schema = await getOrFetchTableSchema(activeConnectionId, dbName, tableName, sqlDialect);
+          const schema = await getOrFetchTableSchema(connectionId, dbName, tableName, sqlDialect);
           pkCols = (schema.primaryKey || []).filter(Boolean);
         } catch {
           pkCols = undefined;
@@ -471,7 +470,7 @@ function StudioView({ groupId }: { groupId: string }) {
         const limit = await resolveQueryLimit();
         const page = await api.queryTablePage(
           new TableQueryRequest({
-            connectionId: activeConnectionId,
+            connectionId,
             database: dbName,
             schema: "",
             table: tableName,
@@ -491,41 +490,26 @@ function StudioView({ groupId }: { groupId: string }) {
           page.limit,
           opts.offset,
         );
-        setTabsByDatabase((prev) => {
-          const list = prev[key] ?? [];
-          return {
-            ...prev,
-            [key]: list.map((t) =>
-              t.id === tabId
-                ? {
-                    ...t,
-                    tableQueryLoading: false,
-                    result,
-                    error: "",
-                    lastExecutedSql: lastSql,
-                    tableTotal: page.total,
-                    tableOffset: page.offset,
-                    tablePageLimit: page.limit,
-                    tableSortColumn: opts.orderBy || undefined,
-                    tableSortDesc: opts.orderDesc,
-                    tablePrimaryKey: pkCols,
-                    tableEditOriginalRows: originalRows,
-                    tableEditDirtyRows: {},
-                  }
-                : t,
-            ),
-          };
-        });
+        finishTableTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
+          ...tab,
+          result,
+          error: "",
+          lastExecutedSql: lastSql,
+          tableTotal: page.total,
+          tableOffset: page.offset,
+          tablePageLimit: page.limit,
+          tableSortColumn: opts.orderBy || undefined,
+          tableSortDesc: opts.orderDesc,
+          tablePrimaryKey: pkCols,
+          tableEditOriginalRows: originalRows,
+          tableEditDirtyRows: {},
+        }));
       } catch (e) {
-        setTabsByDatabase((prev) => {
-          const list = prev[key] ?? [];
-          return {
-            ...prev,
-            [key]: list.map((t) =>
-              t.id === tabId ? { ...t, tableQueryLoading: false, error: String(e), result: null } : t,
-            ),
-          };
-        });
+        finishTableTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
+          ...tab,
+          error: String(e),
+          result: null,
+        }));
       }
     },
     [activeConnectionId, getOrFetchTableSchema, sqlDialect],
@@ -985,6 +969,96 @@ function StudioView({ groupId }: { groupId: string }) {
     });
   };
 
+  const updateExistingDatabaseTabs = (
+    connectionId: string,
+    dbName: string,
+    updater: (tabs: WorkbenchTab[]) => WorkbenchTab[],
+  ) => {
+    if (!connectionId) return;
+    const key = `${connectionId}::${dbName || "__none__"}`;
+    setTabsByDatabase((prev) => {
+      const current = prev[key];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [key]: updater(current),
+      };
+    });
+  };
+
+  const updateTabById = (
+    connectionId: string,
+    dbName: string,
+    tabId: string,
+    updater: (tab: WorkbenchTab) => WorkbenchTab,
+  ) => {
+    updateExistingDatabaseTabs(connectionId, dbName, (list) => list.map((t) => (t.id === tabId ? updater(t) : t)));
+  };
+
+  const beginSqlTabRequest = (
+    connectionId: string,
+    dbName: string,
+    tabId: string,
+    requestId: string,
+    runningSQL: string,
+  ) => {
+    updateTabById(connectionId, dbName, tabId, (tab) => ({
+      ...tab,
+      error: "",
+      sqlResultLoading: true,
+      runningSQL,
+      runningRequestId: requestId,
+    }));
+  };
+
+  const finishSqlTabRequest = (
+    connectionId: string,
+    dbName: string,
+    tabId: string,
+    requestId: string,
+    updater: (tab: WorkbenchTab) => WorkbenchTab,
+  ) => {
+    updateTabById(connectionId, dbName, tabId, (tab) => {
+      if (tab.runningRequestId !== requestId) return tab;
+      return updater({
+        ...tab,
+        sqlResultLoading: false,
+        runningSQL: "",
+        runningRequestId: "",
+      });
+    });
+  };
+
+  const clearSqlTabRequest = (connectionId: string, dbName: string, tabId: string, requestId: string) => {
+    finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => tab);
+  };
+
+  const beginTableTabRequest = (connectionId: string, dbName: string, tabId: string, requestId: string) => {
+    updateTabById(connectionId, dbName, tabId, (tab) => ({
+      ...tab,
+      error: "",
+      tableQueryLoading: true,
+      runningRequestId: requestId,
+    }));
+  };
+
+  const finishTableTabRequest = (
+    connectionId: string,
+    dbName: string,
+    tabId: string,
+    requestId: string,
+    updater: (tab: WorkbenchTab) => WorkbenchTab,
+  ) => {
+    updateTabById(connectionId, dbName, tabId, (tab) => {
+      if (tab.runningRequestId !== requestId) return tab;
+      return updater({
+        ...tab,
+        tableQueryLoading: false,
+        runningRequestId: "",
+      });
+    });
+  };
+
   const setActiveForDatabase = (dbName: string, tabId: string) => {
     if (!activeConnectionId) return;
     const key = `${activeConnectionId}::${dbName || "__none__"}`;
@@ -1214,37 +1288,37 @@ function StudioView({ groupId }: { groupId: string }) {
     if (!activeConnectionId || !activeTab) return;
     const trimmed = (sql || "").trim();
     if (!trimmed) return;
-    upsertDatabaseTabs(selectedDatabase, (list) =>
-      list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: true, runningSQL: trimmed } : t))
-    );
+    const connectionId = activeConnectionId;
+    const dbName = selectedDatabase;
+    const tabId = activeTab.id;
+    const requestId = createRequestId();
+    beginSqlTabRequest(connectionId, dbName, tabId, requestId, trimmed);
     try {
       const r = await api.executeSQL({
-        connectionId: activeConnectionId,
-        database: selectedDatabase,
+        connectionId,
+        database: dbName,
         sql: trimmed,
         mode,
         rowLimit: -1,
         timeoutMs: 30000,
+        requestId,
       });
       pushSqlHistory(trimmed);
       setHistoryRev((n) => n + 1);
-      upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) =>
-          t.id === activeTab.id
-            ? { ...t, sqlResultLoading: false, runningSQL: "", result: r, error: "", lastExecutedSql: trimmed, sqlGridPage: 1 }
-            : t,
-        )
-      );
-      setError("");
+      finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
+        ...tab,
+        result: r,
+        error: "",
+        lastExecutedSql: trimmed,
+        sqlGridPage: 1,
+      }));
     } catch (e) {
-      upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) =>
-          t.id === activeTab.id
-            ? { ...t, sqlResultLoading: false, runningSQL: "", error: String(e), result: null, lastExecutedSql: trimmed }
-            : t,
-        )
-      );
-      setError(String(e));
+      finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
+        ...tab,
+        error: String(e),
+        result: null,
+        lastExecutedSql: trimmed,
+      }));
     }
   };
 
@@ -1269,20 +1343,17 @@ function StudioView({ groupId }: { groupId: string }) {
 
   /** 停止当前正在执行的 SQL。 */
   const cancelCurrentQuery = async () => {
+    if (!activeConnectionId || !activeTab?.runningRequestId) return;
+    const connectionId = activeConnectionId;
+    const dbName = selectedDatabase;
+    const tabId = activeTab.id;
+    const requestId = activeTab.runningRequestId;
     try {
-      await api.cancelRunningQuery();
+      await api.cancelRunningQuery({ requestId });
     } catch (_) {
       // 忽略取消时的错误
     } finally {
-      if (activeTab) {
-        upsertDatabaseTabs(selectedDatabase, (list) =>
-          list.map((t) =>
-            t.id === activeTab.id
-              ? { ...t, sqlResultLoading: false, runningSQL: "" }
-              : t,
-          )
-        );
-      }
+      clearSqlTabRequest(connectionId, dbName, tabId, requestId);
     }
   };
 
@@ -1413,23 +1484,26 @@ function StudioView({ groupId }: { groupId: string }) {
     }
     const trimmed = sqlText.trim();
     if (!trimmed) return;
-    upsertDatabaseTabs(selectedDatabase, (list) =>
-      list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: true } : t))
-    );
+    const connectionId = activeConnectionId;
+    const dbName = selectedDatabase;
+    const tabId = activeTab.id;
+    const requestId = createRequestId();
+    beginSqlTabRequest(connectionId, dbName, tabId, requestId, trimmed);
     try {
       const explainSql = `EXPLAIN ${trimmed}`;
-      const r = await api.explainSQL({ connectionId: activeConnectionId, database: selectedDatabase, sql: trimmed });
-      upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) =>
-          t.id === activeTab.id ? { ...t, sqlResultLoading: false, result: r, error: "", lastExecutedSql: explainSql } : t,
-        )
-      );
-      setError("");
+      const r = await api.explainSQL({ connectionId, database: dbName, sql: trimmed, requestId });
+      finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
+        ...tab,
+        result: r,
+        error: "",
+        lastExecutedSql: explainSql,
+      }));
     } catch (e) {
-      upsertDatabaseTabs(selectedDatabase, (list) =>
-        list.map((t) => (t.id === activeTab.id ? { ...t, sqlResultLoading: false, error: String(e), result: null } : t))
-      );
-      setError(String(e));
+      finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
+        ...tab,
+        error: String(e),
+        result: null,
+      }));
     }
   };
 
@@ -2017,7 +2091,7 @@ function StudioView({ groupId }: { groupId: string }) {
                   title="拖拽调整编辑器/结果高度"
                 />
                 <section className="flex min-h-[200px] flex-1 flex-col gap-2 overflow-hidden border-t border-slate-200 bg-slate-50/40 p-3">
-                  {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
+                  {activeTabError && <p className="text-xs text-red-600">{activeTabError}</p>}
                   {(activeTab?.sqlResultLoading ?? false) && !activeTabResult ? (
                     <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-2 rounded-tf border border-dashed border-slate-200 bg-white/60">
                       <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
@@ -2301,7 +2375,7 @@ function StudioView({ groupId }: { groupId: string }) {
                   );
                 })()}
                 <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
-                  {(activeTabError || error) && <p className="text-xs text-red-600">{activeTabError || error}</p>}
+                  {activeTabError && <p className="text-xs text-red-600">{activeTabError}</p>}
                   {(activeTab.tableQueryLoading ?? false) && !activeTabResult ? (
                     <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-2 rounded-tf border border-dashed border-slate-200 bg-white/60">
                       <Loader2 className="h-7 w-7 animate-spin text-slate-400" strokeWidth={2} />
