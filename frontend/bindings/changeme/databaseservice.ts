@@ -9,6 +9,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function CancelDataMigrationJob(jobID: string): $CancellablePromise<void> {
+    return $Call.ByID(3268196905, jobID);
+}
+
 export function CancelRunningQuery(req: $models.CancelRunningQueryRequest): $CancellablePromise<void> {
     return $Call.ByID(3091379923, req);
 }
@@ -31,9 +35,15 @@ export function ExplainSQL(req: $models.ExplainSQLRequest): $CancellablePromise<
     });
 }
 
+export function GetDataMigrationJob(jobID: string): $CancellablePromise<$models.DataMigrationJobSnapshot> {
+    return $Call.ByID(725792143, jobID).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
 export function GetTableSchema(req: $models.TableSchemaRequest): $CancellablePromise<$models.TableSchema> {
     return $Call.ByID(1557858719, req).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -45,37 +55,37 @@ export function InsertRows(req: $models.InsertRowsRequest): $CancellablePromise<
 
 export function ListDatabases(connectionID: string): $CancellablePromise<$models.SchemaObject[]> {
     return $Call.ByID(4087710774, connectionID).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
 export function ListIndexes(connectionID: string, database: string, schema: string, table: string): $CancellablePromise<$models.SchemaObject[]> {
     return $Call.ByID(3901981548, connectionID, database, schema, table).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
 export function ListSchemas(connectionID: string, database: string): $CancellablePromise<$models.SchemaObject[]> {
     return $Call.ByID(2893177596, connectionID, database).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
 export function ListTables(connectionID: string, database: string, schema: string): $CancellablePromise<$models.SchemaObject[]> {
     return $Call.ByID(4175186377, connectionID, database, schema).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
 export function ListViews(connectionID: string, database: string, schema: string): $CancellablePromise<$models.SchemaObject[]> {
     return $Call.ByID(2131088434, connectionID, database, schema).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
 export function MigrateTableData(req: $models.DataMigrationRequest): $CancellablePromise<$models.DataMigrationResult> {
     return $Call.ByID(3157894491, req).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType5($result);
     });
 }
 
@@ -84,7 +94,7 @@ export function MigrateTableData(req: $models.DataMigrationRequest): $Cancellabl
  */
 export function PreviewInsertRowsSQL(req: $models.PreviewInsertRowsRequest): $CancellablePromise<$models.InsertRowsSQLPreviewResponse> {
     return $Call.ByID(2443741732, req).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -93,13 +103,19 @@ export function PreviewInsertRowsSQL(req: $models.PreviewInsertRowsRequest): $Ca
  */
 export function PreviewUpdateRowsSQL(req: $models.UpdateRowsRequest): $CancellablePromise<$models.UpdateRowsSQLPreviewResponse> {
     return $Call.ByID(418193440, req).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
 export function QueryTablePage(req: $models.TableQueryRequest): $CancellablePromise<$models.QueryResultPage> {
     return $Call.ByID(2696123903, req).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
+    });
+}
+
+export function StartDataMigration(req: $models.DataMigrationBatchRequest): $CancellablePromise<$models.DataMigrationJobSnapshot> {
+    return $Call.ByID(1188566404, req).then(($result: any) => {
+        return $$createType1($result);
     });
 }
 
@@ -111,10 +127,11 @@ export function UpdateRows(req: $models.UpdateRowsRequest): $CancellablePromise<
 
 // Private type creation functions
 const $$createType0 = $models.SQLExecutionResult.createFrom;
-const $$createType1 = $models.TableSchema.createFrom;
-const $$createType2 = $models.SchemaObject.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = $models.DataMigrationResult.createFrom;
-const $$createType5 = $models.InsertRowsSQLPreviewResponse.createFrom;
-const $$createType6 = $models.UpdateRowsSQLPreviewResponse.createFrom;
-const $$createType7 = $models.QueryResultPage.createFrom;
+const $$createType1 = $models.DataMigrationJobSnapshot.createFrom;
+const $$createType2 = $models.TableSchema.createFrom;
+const $$createType3 = $models.SchemaObject.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $models.DataMigrationResult.createFrom;
+const $$createType6 = $models.InsertRowsSQLPreviewResponse.createFrom;
+const $$createType7 = $models.UpdateRowsSQLPreviewResponse.createFrom;
+const $$createType8 = $models.QueryResultPage.createFrom;

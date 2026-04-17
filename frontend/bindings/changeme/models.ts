@@ -312,6 +312,140 @@ export class ConnectionUpsertRequest {
     }
 }
 
+export class DataMigrationBatchRequest {
+    "sourceConnectionId": string;
+    "sourceDatabase": string;
+    "sourceSchema": string;
+    "sourceTables": string[];
+    "targetConnectionId": string;
+    "targetDatabase": string;
+    "targetSchema": string;
+    "truncateTarget": boolean;
+    "workerCount": number;
+    "batchSize": number;
+
+    /** Creates a new DataMigrationBatchRequest instance. */
+    constructor($$source: Partial<DataMigrationBatchRequest> = {}) {
+        if (!("sourceConnectionId" in $$source)) {
+            this["sourceConnectionId"] = "";
+        }
+        if (!("sourceDatabase" in $$source)) {
+            this["sourceDatabase"] = "";
+        }
+        if (!("sourceSchema" in $$source)) {
+            this["sourceSchema"] = "";
+        }
+        if (!("sourceTables" in $$source)) {
+            this["sourceTables"] = [];
+        }
+        if (!("targetConnectionId" in $$source)) {
+            this["targetConnectionId"] = "";
+        }
+        if (!("targetDatabase" in $$source)) {
+            this["targetDatabase"] = "";
+        }
+        if (!("targetSchema" in $$source)) {
+            this["targetSchema"] = "";
+        }
+        if (!("truncateTarget" in $$source)) {
+            this["truncateTarget"] = false;
+        }
+        if (!("workerCount" in $$source)) {
+            this["workerCount"] = 0;
+        }
+        if (!("batchSize" in $$source)) {
+            this["batchSize"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DataMigrationBatchRequest instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DataMigrationBatchRequest {
+        const $$createField3_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("sourceTables" in $$parsedSource) {
+            $$parsedSource["sourceTables"] = $$createField3_0($$parsedSource["sourceTables"]);
+        }
+        return new DataMigrationBatchRequest($$parsedSource as Partial<DataMigrationBatchRequest>);
+    }
+}
+
+export class DataMigrationJobSnapshot {
+    "jobId": string;
+    "status": string;
+    "workerCount": number;
+    "batchSize": number;
+    "total": number;
+    "pending": number;
+    "running": number;
+    "success": number;
+    "failed": number;
+    "tables": DataMigrationTableStatus[];
+    "startedAt": time$0.Time;
+    "endedAt": time$0.Time;
+    "message": string;
+
+    /** Creates a new DataMigrationJobSnapshot instance. */
+    constructor($$source: Partial<DataMigrationJobSnapshot> = {}) {
+        if (!("jobId" in $$source)) {
+            this["jobId"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("workerCount" in $$source)) {
+            this["workerCount"] = 0;
+        }
+        if (!("batchSize" in $$source)) {
+            this["batchSize"] = 0;
+        }
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+        if (!("pending" in $$source)) {
+            this["pending"] = 0;
+        }
+        if (!("running" in $$source)) {
+            this["running"] = 0;
+        }
+        if (!("success" in $$source)) {
+            this["success"] = 0;
+        }
+        if (!("failed" in $$source)) {
+            this["failed"] = 0;
+        }
+        if (!("tables" in $$source)) {
+            this["tables"] = [];
+        }
+        if (!("startedAt" in $$source)) {
+            this["startedAt"] = null;
+        }
+        if (!("endedAt" in $$source)) {
+            this["endedAt"] = null;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DataMigrationJobSnapshot instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DataMigrationJobSnapshot {
+        const $$createField9_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tables" in $$parsedSource) {
+            $$parsedSource["tables"] = $$createField9_0($$parsedSource["tables"]);
+        }
+        return new DataMigrationJobSnapshot($$parsedSource as Partial<DataMigrationJobSnapshot>);
+    }
+}
+
 export class DataMigrationRequest {
     "sourceConnectionId": string;
     "sourceDatabase": string;
@@ -322,6 +456,7 @@ export class DataMigrationRequest {
     "targetSchema": string;
     "targetTable": string;
     "truncateTarget": boolean;
+    "batchSize": number;
 
     /** Creates a new DataMigrationRequest instance. */
     constructor($$source: Partial<DataMigrationRequest> = {}) {
@@ -351,6 +486,9 @@ export class DataMigrationRequest {
         }
         if (!("truncateTarget" in $$source)) {
             this["truncateTarget"] = false;
+        }
+        if (!("batchSize" in $$source)) {
+            this["batchSize"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -387,6 +525,55 @@ export class DataMigrationResult {
     static createFrom($$source: any = {}): DataMigrationResult {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new DataMigrationResult($$parsedSource as Partial<DataMigrationResult>);
+    }
+}
+
+export class DataMigrationTableStatus {
+    "table": string;
+    "targetTable": string;
+    "status": string;
+    "migratedRows": number;
+    "message": string;
+    "error": string;
+    "startedAt": time$0.Time;
+    "endedAt": time$0.Time;
+
+    /** Creates a new DataMigrationTableStatus instance. */
+    constructor($$source: Partial<DataMigrationTableStatus> = {}) {
+        if (!("table" in $$source)) {
+            this["table"] = "";
+        }
+        if (!("targetTable" in $$source)) {
+            this["targetTable"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("migratedRows" in $$source)) {
+            this["migratedRows"] = 0;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+        if (!("error" in $$source)) {
+            this["error"] = "";
+        }
+        if (!("startedAt" in $$source)) {
+            this["startedAt"] = null;
+        }
+        if (!("endedAt" in $$source)) {
+            this["endedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DataMigrationTableStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DataMigrationTableStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DataMigrationTableStatus($$parsedSource as Partial<DataMigrationTableStatus>);
     }
 }
 
@@ -427,7 +614,7 @@ export class DeleteRowsRequest {
      */
     static createFrom($$source: any = {}): DeleteRowsRequest {
         const $$createField4_0 = $$createType0;
-        const $$createField5_0 = $$createType2;
+        const $$createField5_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("keyColumns" in $$parsedSource) {
             $$parsedSource["keyColumns"] = $$createField4_0($$parsedSource["keyColumns"]);
@@ -632,7 +819,7 @@ export class InsertRowsRequest {
      * Creates a new InsertRowsRequest instance from a string or object.
      */
     static createFrom($$source: any = {}): InsertRowsRequest {
-        const $$createField4_0 = $$createType2;
+        const $$createField4_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("rows" in $$parsedSource) {
             $$parsedSource["rows"] = $$createField4_0($$parsedSource["rows"]);
@@ -709,7 +896,7 @@ export class PreviewInsertRowsRequest {
      */
     static createFrom($$source: any = {}): PreviewInsertRowsRequest {
         const $$createField4_0 = $$createType0;
-        const $$createField5_0 = $$createType2;
+        const $$createField5_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField4_0($$parsedSource["columns"]);
@@ -760,7 +947,7 @@ export class QueryResultPage {
     static createFrom($$source: any = {}): QueryResultPage {
         const $$createField0_0 = $$createType0;
         const $$createField1_0 = $$createType0;
-        const $$createField2_0 = $$createType2;
+        const $$createField2_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField0_0($$parsedSource["columns"]);
@@ -817,7 +1004,7 @@ export class SQLExecutionResult {
     static createFrom($$source: any = {}): SQLExecutionResult {
         const $$createField0_0 = $$createType0;
         const $$createField1_0 = $$createType0;
-        const $$createField2_0 = $$createType2;
+        const $$createField2_0 = $$createType4;
         const $$createField8_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
@@ -860,7 +1047,7 @@ export class SaveStudioSessionRequest {
      * Creates a new SaveStudioSessionRequest instance from a string or object.
      */
     static createFrom($$source: any = {}): SaveStudioSessionRequest {
-        const $$createField2_0 = $$createType4;
+        const $$createField2_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tabs" in $$parsedSource) {
             $$parsedSource["tabs"] = $$createField2_0($$parsedSource["tabs"]);
@@ -1055,7 +1242,7 @@ export class StudioSessionSnapshot {
      * Creates a new StudioSessionSnapshot instance from a string or object.
      */
     static createFrom($$source: any = {}): StudioSessionSnapshot {
-        const $$createField2_0 = $$createType4;
+        const $$createField2_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tabs" in $$parsedSource) {
             $$parsedSource["tabs"] = $$createField2_0($$parsedSource["tabs"]);
@@ -1254,7 +1441,7 @@ export class TableSchema {
      * Creates a new TableSchema instance from a string or object.
      */
     static createFrom($$source: any = {}): TableSchema {
-        const $$createField7_0 = $$createType6;
+        const $$createField7_0 = $$createType8;
         const $$createField8_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
@@ -1337,7 +1524,7 @@ export class UpdateRowsRequest {
      */
     static createFrom($$source: any = {}): UpdateRowsRequest {
         const $$createField4_0 = $$createType0;
-        const $$createField5_0 = $$createType2;
+        const $$createField5_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("keyColumns" in $$parsedSource) {
             $$parsedSource["keyColumns"] = $$createField4_0($$parsedSource["keyColumns"]);
@@ -1449,9 +1636,11 @@ export class WorkspaceGroup {
 
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = $Create.Map($Create.Any, $Create.Any);
+const $$createType1 = DataMigrationTableStatus.createFrom;
 const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = StudioTabSnapshot.createFrom;
+const $$createType3 = $Create.Map($Create.Any, $Create.Any);
 const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = TableColumnSchema.createFrom;
+const $$createType5 = StudioTabSnapshot.createFrom;
 const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = TableColumnSchema.createFrom;
+const $$createType8 = $Create.Array($$createType7);

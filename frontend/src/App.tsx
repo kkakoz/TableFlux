@@ -37,6 +37,7 @@ import {
 import { api } from "./api";
 import type {
   ConnectionMeta,
+  DataMigrationJobSnapshot,
   ExecuteSQLResult,
   TableSchema,
   WorkspaceGroup,
@@ -52,6 +53,8 @@ import { pushSqlHistory, readSqlHistory } from "./utils/sqlHistory";
 import { findStatementAtLine, parseSqlStatements, splitStatementsBySemicolon } from "./utils/sqlStatements";
 import {
   extractQualifierBeforeDot,
+  extractReferencedCurrentDatabaseTables,
+  mergeContextTableColumnCompletionItems,
   mergeDotCompletionItems,
   resolveTableSchemaRequest,
 } from "./utils/sqlDotCompletion";
@@ -431,6 +434,10 @@ function StudioView({ groupId }: { groupId: string }) {
   const [migrationOpen, setMigrationOpen] = useState(false);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationMsg, setMigrationMsg] = useState("");
+  const [migrationWorkerCount, setMigrationWorkerCount] = useState(2);
+  const [migrationBatchSize, setMigrationBatchSize] = useState(500);
+  const [migrationTableFilter, setMigrationTableFilter] = useState("");
+  const [migrationJob, setMigrationJob] = useState<DataMigrationJobSnapshot | null>(null);
   const [allGroups, setAllGroups] = useState<WorkspaceGroup[]>([]);
   const [sourceGroupId, setSourceGroupId] = useState("");
   const [sourceConnectionId, setSourceConnectionId] = useState("");
@@ -467,6 +474,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const [displayTimezone, setDisplayTimezone] = useState(() => readDisplayTimezone());
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
+  const currentDatabaseTablesRef = useRef<string[]>([]);
   const completionContextRef = useRef<{
     connectionId: string;
     database: string;
@@ -475,6 +483,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const tableSchemaCacheRef = useRef<Map<string, TableSchema>>(new Map());
   const completionDisposableRef = useRef<IDisposable | null>(null);
   const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
+  const tableFilterInputRef = useRef<HTMLInputElement | null>(null);
   const runSQLSingleAtCursorRef = useRef<() => void>(() => {});
   const addTabRef = useRef<() => void>(() => {});
   const openAiAssistRef = useRef<() => void>(() => {});
@@ -652,7 +661,10 @@ function StudioView({ groupId }: { groupId: string }) {
   useEffect(() => {
     const allTables = dbTree.flatMap((db) => db.tables);
     completionWordsRef.current = [...new Set([...SQL_KEYWORDS, ...allTables])];
-  }, [dbTree]);
+    currentDatabaseTablesRef.current = selectedDatabase
+      ? (dbTree.find((db) => db.name === selectedDatabase)?.tables ?? [])
+      : [];
+  }, [dbTree, selectedDatabase]);
 
   useEffect(() => {
     completionContextRef.current = {
@@ -1484,7 +1496,49 @@ function StudioView({ groupId }: { groupId: string }) {
     setActiveTabByDatabase((prev) => ({ ...prev, [key]: fallback }));
   };
 
+  useEffect(() => {
+    const onGlobalShortcut = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      const primary = e.ctrlKey || e.metaKey;
+      if (!primary || e.altKey) return;
+
+      if (e.shiftKey && key === "f") {
+        e.preventDefault();
+        e.stopPropagation();
+        tableFilterInputRef.current?.focus();
+        tableFilterInputRef.current?.select();
+        return;
+      }
+
+      if (e.shiftKey) return;
+
+      if (key === "q") {
+        e.preventDefault();
+        e.stopPropagation();
+        addTab();
+        return;
+      }
+
+      if (key === "w") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (activeTab) removeTab(activeTab.id);
+      }
+    };
+
+    window.addEventListener("keydown", onGlobalShortcut, true);
+    return () => window.removeEventListener("keydown", onGlobalShortcut, true);
+  }, [activeTab, addTab, removeTab]);
+
   const historyEntries = useMemo(() => readSqlHistory(), [historyRev]);
+  const filteredMigrationSourceTables = useMemo(() => {
+    const keyword = migrationTableFilter.trim().toLowerCase();
+    if (!keyword) return sourceTables;
+    return sourceTables.filter((tableName) => tableName.toLowerCase().includes(keyword));
+  }, [migrationTableFilter, sourceTables]);
+  const migrationCompletedCount = migrationJob ? migrationJob.success + migrationJob.failed : 0;
+  const migrationProgressPercent =
+    migrationJob && migrationJob.total > 0 ? Math.round((migrationCompletedCount / migrationJob.total) * 100) : 0;
 
   const useHistorySql = (sql: string) => {
     setTabSQL(sql);
@@ -1538,9 +1592,87 @@ function StudioView({ groupId }: { groupId: string }) {
     );
   };
 
+  const runMigrationBatch = async () => {
+    if (!sourceConnectionId || !targetConnectionId || !sourceDatabase || !targetDatabase) {
+      setMigrationMsg("请完整选择源连接、目标连接、源数据库和目标数据库");
+      return;
+    }
+    if (selectedSourceTables.length === 0) {
+      setMigrationMsg("请至少选择一个要迁移的源表");
+      return;
+    }
+    setMigrationBusy(true);
+    setMigrationMsg("");
+    setMigrationJob(null);
+    try {
+      const job = (await api.startDataMigration({
+        sourceConnectionId,
+        sourceDatabase,
+        sourceSchema: "",
+        sourceTables: selectedSourceTables,
+        targetConnectionId,
+        targetDatabase,
+        targetSchema: "",
+        truncateTarget,
+        workerCount: migrationWorkerCount,
+        batchSize: migrationBatchSize,
+      })) as DataMigrationJobSnapshot;
+      setMigrationJob(job);
+      setMigrationMsg(`迁移任务已启动，${job.workerCount} 个协程处理中`);
+    } catch (e) {
+      setMigrationMsg(String(e));
+      setMigrationBusy(false);
+    }
+  };
+
+  const cancelMigration = async () => {
+    if (!migrationJob?.jobId) return;
+    try {
+      await api.cancelDataMigrationJob(migrationJob.jobId);
+      const job = (await api.getDataMigrationJob(migrationJob.jobId)) as DataMigrationJobSnapshot;
+      setMigrationJob(job);
+      setMigrationMsg("迁移任务已取消");
+    } catch (e) {
+      setMigrationMsg(String(e));
+    } finally {
+      setMigrationBusy(false);
+    }
+  };
+
   const toggleSelectAllSourceTables = () => {
     setSelectedSourceTables((prev) => (prev.length === sourceTables.length ? [] : [...sourceTables]));
   };
+
+  useEffect(() => {
+    if (!migrationBusy || !migrationJob?.jobId) return;
+    let stopped = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const job = (await api.getDataMigrationJob(migrationJob.jobId)) as DataMigrationJobSnapshot;
+        if (stopped) return;
+        setMigrationJob(job);
+        if (job.status !== "running") {
+          window.clearInterval(timer);
+          setMigrationBusy(false);
+          const done = job.success + job.failed;
+          setMigrationMsg(
+            job.failed > 0
+              ? `迁移完成：${done}/${job.total}，成功 ${job.success}，失败 ${job.failed}`
+              : `迁移完成：成功 ${job.success}/${job.total}`,
+          );
+        }
+      } catch (e) {
+        if (stopped) return;
+        window.clearInterval(timer);
+        setMigrationBusy(false);
+        setMigrationMsg(String(e));
+      }
+    }, 800);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [migrationBusy, migrationJob?.jobId]);
 
   useEffect(() => {
     runSQLSingleAtCursorRef.current = runSQLSingleAtCursor;
@@ -1750,6 +1882,47 @@ function StudioView({ groupId }: { groupId: string }) {
               range,
             }));
             return { suggestions: keywordOnly };
+          }
+
+          if (ctx.connectionId && ctx.database) {
+            const cursorOffset = model.getOffsetAt(position);
+            const textBeforeCursor = model.getValue().slice(0, cursorOffset);
+            const currentFragment = textBeforeCursor.slice(textBeforeCursor.lastIndexOf(";") + 1);
+            const referencedTables = extractReferencedCurrentDatabaseTables(
+              currentFragment,
+              currentDatabaseTablesRef.current,
+            );
+
+            if (referencedTables.length > 0) {
+              const tableColumns: Array<{ tableName: string; columns: TableSchema["columns"] }> = [];
+              for (const tableName of referencedTables) {
+                const schemaName = ctx.dialect === "postgres" ? "public" : "";
+                const cacheKey = `${ctx.connectionId}|${ctx.database}|${schemaName}|${tableName}`;
+                let schema = tableSchemaCacheRef.current.get(cacheKey);
+                if (!schema) {
+                  try {
+                    schema = (await api.getTableSchema({
+                      connectionId: ctx.connectionId,
+                      database: ctx.database,
+                      schema: schemaName,
+                      table: tableName,
+                    })) as TableSchema;
+                    tableSchemaCacheRef.current.set(cacheKey, schema);
+                  } catch {
+                    schema = undefined;
+                  }
+                }
+                if (schema?.columns?.length) {
+                  tableColumns.push({ tableName, columns: schema.columns });
+                }
+              }
+
+              if (tableColumns.length > 0) {
+                return {
+                  suggestions: mergeContextTableColumnCompletionItems(monaco, range, tableColumns, keywords),
+                };
+              }
+            }
           }
 
           const suggestions: languages.CompletionItem[] = keywords.map((kw) => ({
@@ -1971,6 +2144,7 @@ function StudioView({ groupId }: { groupId: string }) {
           </div>
           <div className="shrink-0 border-t border-slate-200 px-1.5 py-1">
             <input
+              ref={tableFilterInputRef}
               className="h-5 w-full rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[9px] leading-tight text-slate-800 outline-none ring-blue-500/30 focus:border-blue-300 focus:ring-2 placeholder:text-slate-400"
               value={tableFilter}
               onChange={(e) => setTableFilter(e.target.value)}
@@ -2727,7 +2901,7 @@ function StudioView({ groupId }: { groupId: string }) {
           </>
         )}
 
-        {migrationOpen && (
+        {false && migrationOpen && (
           <div className="modal-mask" onClick={() => setMigrationOpen(false)}>
             <div className="modal-panel large" onClick={(e) => e.stopPropagation()}>
               <div className="modal-head">
@@ -2816,12 +2990,216 @@ function StudioView({ groupId }: { groupId: string }) {
           </div>
         )}
 
+        {migrationOpen && (
+          <div className="modal-mask">
+            <div className="modal-panel migration-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head migration-head">
+                <div>
+                  <h3>数据迁移</h3>
+                  <p className="migration-subtitle">按表并发迁移数据，每个协程一次处理一张表。</p>
+                </div>
+                <button className="btn ghost" onClick={() => setMigrationOpen(false)} disabled={migrationBusy}>
+                  关闭
+                </button>
+              </div>
+
+              <div className="migration-config">
+                <label>
+                  源分组
+                  <select value={sourceGroupId} onChange={(e) => setSourceGroupId(e.target.value)} disabled={migrationBusy}>
+                    <option value="">选择分组</option>
+                    {allGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  源连接
+                  <select value={sourceConnectionId} onChange={(e) => setSourceConnectionId(e.target.value)} disabled={migrationBusy}>
+                    <option value="">选择连接</option>
+                    {sourceGroupConnections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  源数据库
+                  <select value={sourceDatabase} onChange={(e) => setSourceDatabase(e.target.value)} disabled={!sourceConnectionId || migrationBusy}>
+                    <option value="">选择数据库</option>
+                    {sourceDatabases.map((db) => <option key={db} value={db}>{db}</option>)}
+                  </select>
+                </label>
+                <label>
+                  目标分组
+                  <select value={targetGroupId} onChange={(e) => setTargetGroupId(e.target.value)} disabled={migrationBusy}>
+                    <option value="">选择分组</option>
+                    {allGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  目标连接
+                  <select value={targetConnectionId} onChange={(e) => setTargetConnectionId(e.target.value)} disabled={migrationBusy}>
+                    <option value="">选择连接</option>
+                    {targetGroupConnections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  目标数据库
+                  <select value={targetDatabase} onChange={(e) => setTargetDatabase(e.target.value)} disabled={!targetConnectionId || migrationBusy}>
+                    <option value="">选择数据库</option>
+                    {targetDatabases.map((db) => <option key={db} value={db}>{db}</option>)}
+                  </select>
+                </label>
+                <label>
+                  协程数量
+                  <input
+                    type="number"
+                    min={1}
+                    max={8}
+                    value={migrationWorkerCount}
+                    onChange={(e) => setMigrationWorkerCount(Math.min(8, Math.max(1, Number(e.target.value) || 2)))}
+                    disabled={migrationBusy}
+                  />
+                </label>
+                <label>
+                  批量行数
+                  <select
+                    value={migrationBatchSize}
+                    onChange={(e) => setMigrationBatchSize(Number(e.target.value))}
+                    disabled={migrationBusy}
+                  >
+                    <option value={200}>200</option>
+                    <option value={500}>500</option>
+                    <option value={1000}>1000</option>
+                  </select>
+                </label>
+                <label className="migration-check">
+                  <input type="checkbox" checked={truncateTarget} onChange={(e) => setTruncateTarget(e.target.checked)} disabled={migrationBusy} />
+                  迁移前清空目标表
+                </label>
+              </div>
+
+              <div className="migration-picker-layout">
+                <section className="migration-section">
+                  <div className="migration-section-head">
+                    <div>
+                      <h4>源表</h4>
+                      <span>{selectedSourceTables.length}/{sourceTables.length} 已选择</span>
+                    </div>
+                    <button className="btn ghost" type="button" onClick={toggleSelectAllSourceTables} disabled={sourceTables.length === 0 || migrationBusy}>
+                      {selectedSourceTables.length === sourceTables.length && sourceTables.length > 0 ? "取消全选" : "全选"}
+                    </button>
+                  </div>
+                  <input
+                    className="migration-search"
+                    value={migrationTableFilter}
+                    onChange={(e) => setMigrationTableFilter(e.target.value)}
+                    placeholder="搜索源表"
+                    disabled={migrationBusy}
+                  />
+                  <div className="migration-table-list">
+                    {filteredMigrationSourceTables.length === 0 ? (
+                      <p className="sub">暂无可选源表</p>
+                    ) : (
+                      filteredMigrationSourceTables.map((tableName) => (
+                        <label key={tableName} className="migration-table-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedSourceTables.includes(tableName)}
+                            onChange={() => toggleSourceTable(tableName)}
+                            disabled={migrationBusy}
+                          />
+                          <span>{tableName}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </section>
+
+                <section className="migration-section">
+                  <div className="migration-section-head">
+                    <div>
+                      <h4>目标表对照</h4>
+                      <span>{targetTables.length} 张表</span>
+                    </div>
+                  </div>
+                  <div className="migration-table-list target">
+                    {targetTables.length === 0 ? (
+                      <p className="sub">选择目标数据库后显示表列表</p>
+                    ) : (
+                      targetTables.map((tableName) => (
+                        <div key={tableName} className="migration-table-option view">
+                          <span>{tableName}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              <div className="migration-actions">
+                <button className="btn" onClick={runMigrationBatch} disabled={migrationBusy || selectedSourceTables.length === 0}>
+                  {migrationBusy ? "迁移中..." : "开始迁移"}
+                </button>
+                <button className="btn ghost" onClick={cancelMigration} disabled={!migrationBusy || !migrationJob?.jobId}>
+                  取消任务
+                </button>
+                <span className="sub">默认同名迁移到目标库，当前选择 {selectedSourceTables.length} 张表。</span>
+              </div>
+
+              {migrationJob && (
+                <div className="migration-progress">
+                  <div className="migration-progress-top">
+                    <strong>{migrationProgressPercent}%</strong>
+                    <span>
+                      已完成 {migrationCompletedCount}/{migrationJob.total}，成功 {migrationJob.success}，失败 {migrationJob.failed}，运行中 {migrationJob.running}
+                    </span>
+                  </div>
+                  <div className="migration-progress-bar">
+                    <span style={{ width: `${migrationProgressPercent}%` }} />
+                  </div>
+                  <div className="migration-status-table">
+                    <div className="migration-status-row head">
+                      <span>表名</span>
+                      <span>状态</span>
+                      <span>行数</span>
+                      <span>信息</span>
+                    </div>
+                    {migrationJob.tables.map((table) => (
+                      <div key={table.table} className={`migration-status-row ${table.status}`}>
+                        <span title={table.table}>{table.table}</span>
+                        <span>{migrationStatusLabel(table.status)}</span>
+                        <span>{table.migratedRows || "-"}</span>
+                        <span title={table.error || table.message}>{table.error || table.message || "-"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {migrationMsg && <p className="migration-message">{migrationMsg}</p>}
+            </div>
+          </div>
+        )}
+
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
 
 type HeaderBounds = { x: number; y: number; width: number; height: number };
+
+function migrationStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+      return "待处理";
+    case "running":
+      return "迁移中";
+    case "success":
+      return "成功";
+    case "failed":
+      return "失败";
+    case "canceled":
+      return "已取消";
+    default:
+      return status || "-";
+  }
+}
 
 function getDefaultColumnWidthByDbType(dbType: string | undefined): number {
   const fallbackWidth = 180;
@@ -3574,4 +3952,3 @@ function VirtualResultGrid({
 }
 
 export default App;
-

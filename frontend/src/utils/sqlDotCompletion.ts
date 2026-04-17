@@ -100,3 +100,73 @@ export function mergeDotCompletionItems(
 
   return [...colItems, ...kwItems];
 }
+
+function normalizeSqlIdentifier(raw: string): string {
+  const trimmed = raw.trim();
+  if (
+    (trimmed.startsWith("`") && trimmed.endsWith("`")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * 从上一个分号到光标之间的片段里找当前库表名。这里不做完整 SQL 解析，只做标识符级别匹配，
+ * 覆盖 `users`、"users"、db.users、schema.users 等常见写法。
+ */
+export function extractReferencedCurrentDatabaseTables(sqlFragment: string, tableNames: string[]): string[] {
+  if (!sqlFragment.trim() || tableNames.length === 0) return [];
+
+  const tableByLower = new Map(tableNames.map((name) => [name.toLowerCase(), name]));
+  const found = new Set<string>();
+  const identifierRe = /`(?:``|[^`])+`|"(?:[^"]|"")+"|[A-Za-z_][\w$]*/g;
+  let match: RegExpExecArray | null;
+  while ((match = identifierRe.exec(sqlFragment)) !== null) {
+    const identifier = normalizeSqlIdentifier(match[0]).toLowerCase();
+    const tableName = tableByLower.get(identifier);
+    if (tableName) found.add(tableName);
+  }
+  return [...found];
+}
+
+export function mergeContextTableColumnCompletionItems(
+  monaco: typeof import("monaco-editor"),
+  range: IRange,
+  tableColumns: Array<{ tableName: string; columns: TableColumnSchema[] }>,
+  keywords: string[],
+): languages.CompletionItem[] {
+  const fieldItems: languages.CompletionItem[] = [];
+  const labels = new Set<string>();
+
+  for (const table of tableColumns) {
+    for (const col of table.columns) {
+      const labelKey = `${table.tableName}.${col.name}`.toLowerCase();
+      if (labels.has(labelKey)) continue;
+      labels.add(labelKey);
+      fieldItems.push({
+        label: col.name,
+        kind: monaco.languages.CompletionItemKind.Field,
+        insertText: col.name,
+        detail: table.tableName,
+        documentation: [col.type, col.comment].filter(Boolean).join(" · "),
+        sortText: `0_${col.name}_${table.tableName}`,
+        range,
+      });
+    }
+  }
+
+  const fieldLabels = new Set(fieldItems.map((item) => String(item.label).toLowerCase()));
+  const keywordItems: languages.CompletionItem[] = keywords
+    .filter((kw) => !fieldLabels.has(kw.toLowerCase()))
+    .map((kw) => ({
+      label: kw,
+      kind: monaco.languages.CompletionItemKind.Keyword,
+      insertText: kw,
+      sortText: `1_${kw}`,
+      range,
+    }));
+
+  return [...fieldItems, ...keywordItems];
+}

@@ -194,11 +194,52 @@ type DataMigrationRequest struct {
 	TargetSchema       string `json:"targetSchema"`
 	TargetTable        string `json:"targetTable"`
 	TruncateTarget     bool   `json:"truncateTarget"`
+	BatchSize          int    `json:"batchSize"`
 }
 
 type DataMigrationResult struct {
 	MigratedRows int64  `json:"migratedRows"`
 	Message      string `json:"message"`
+}
+
+type DataMigrationBatchRequest struct {
+	SourceConnectionID string   `json:"sourceConnectionId"`
+	SourceDatabase     string   `json:"sourceDatabase"`
+	SourceSchema       string   `json:"sourceSchema"`
+	SourceTables       []string `json:"sourceTables"`
+	TargetConnectionID string   `json:"targetConnectionId"`
+	TargetDatabase     string   `json:"targetDatabase"`
+	TargetSchema       string   `json:"targetSchema"`
+	TruncateTarget     bool     `json:"truncateTarget"`
+	WorkerCount        int      `json:"workerCount"`
+	BatchSize          int      `json:"batchSize"`
+}
+
+type DataMigrationTableStatus struct {
+	Table        string    `json:"table"`
+	TargetTable  string    `json:"targetTable"`
+	Status       string    `json:"status"`
+	MigratedRows int64     `json:"migratedRows"`
+	Message      string    `json:"message"`
+	Error        string    `json:"error"`
+	StartedAt    time.Time `json:"startedAt"`
+	EndedAt      time.Time `json:"endedAt"`
+}
+
+type DataMigrationJobSnapshot struct {
+	JobID       string                     `json:"jobId"`
+	Status      string                     `json:"status"`
+	WorkerCount int                        `json:"workerCount"`
+	BatchSize   int                        `json:"batchSize"`
+	Total       int                        `json:"total"`
+	Pending     int                        `json:"pending"`
+	Running     int                        `json:"running"`
+	Success     int                        `json:"success"`
+	Failed      int                        `json:"failed"`
+	Tables      []DataMigrationTableStatus `json:"tables"`
+	StartedAt   time.Time                  `json:"startedAt"`
+	EndedAt     time.Time                  `json:"endedAt"`
+	Message     string                     `json:"message"`
 }
 
 type StudioTabSnapshot struct {

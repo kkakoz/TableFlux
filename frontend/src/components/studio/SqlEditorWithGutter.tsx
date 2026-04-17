@@ -21,6 +21,7 @@ type Props = {
 };
 
 const DEFAULT_LINE_HEIGHT = 19;
+const GUTTER_BUTTON_SIZE = 16;
 
 export default function SqlEditorWithGutter({
   value,
@@ -143,14 +144,17 @@ export default function SqlEditorWithGutter({
             return (
               <div
                 key={lineNo}
-                className="group/line absolute flex w-full items-start border-b border-transparent text-[11px] leading-none text-slate-400 hover:bg-slate-300/25"
+                className="group/line absolute flex w-full items-center border-b border-transparent text-[11px] leading-none text-slate-400 hover:bg-slate-300/25"
                 style={{ top, height: rowHeight }}
               >
-                <div className="flex min-w-0 flex-1 select-none items-start justify-end pr-1.5 pt-[2px] tabular-nums text-slate-400">
+                <div className="flex min-w-0 flex-1 select-none items-center justify-end pr-1.5 tabular-nums text-slate-400">
                   {lineNo}
                 </div>
-                <div className="flex w-[22px] shrink-0 items-start justify-center pt-[1px]">
-                  <div className="flex h-5 w-5 items-center justify-center">
+                <div className="flex w-[22px] shrink-0 items-center justify-center">
+                  <div
+                    className="flex items-center justify-center"
+                    style={{ height: GUTTER_BUTTON_SIZE, width: GUTTER_BUTTON_SIZE }}
+                  >
                     {stmt ? (() => {
                     const isAnyRunning = !!runningSQL;
                     const isThisRunning = isAnyRunning && stmt.sql.trim() === runningSQL?.trim();
@@ -159,14 +163,15 @@ export default function SqlEditorWithGutter({
                         <button
                           type="button"
                           title="停止执行"
-                          className="flex h-5 w-5 items-center justify-center rounded bg-transparent text-red-600 hover:bg-transparent hover:text-red-700"
+                          className="flex items-center justify-center rounded bg-transparent text-red-600 hover:bg-transparent hover:text-red-700"
+                          style={{ height: GUTTER_BUTTON_SIZE, width: GUTTER_BUTTON_SIZE }}
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             onStopStatement?.();
                           }}
                         >
-                          <Square className="h-3 w-3" fill="currentColor" strokeWidth={0} />
+                          <Square className="h-2.5 w-2.5" fill="currentColor" strokeWidth={0} />
                         </button>
                       );
                     }
@@ -175,7 +180,8 @@ export default function SqlEditorWithGutter({
                         type="button"
                         disabled={executeDisabled || isAnyRunning}
                         title="执行该语句"
-                        className="flex h-5 w-5 items-center justify-center rounded bg-transparent text-emerald-600 hover:bg-transparent hover:text-emerald-600 disabled:cursor-not-allowed disabled:text-slate-400 disabled:opacity-40"
+                        className="flex items-center justify-center rounded bg-transparent text-emerald-600 hover:bg-transparent hover:text-emerald-600 disabled:cursor-not-allowed disabled:text-slate-400 disabled:opacity-40"
+                        style={{ height: GUTTER_BUTTON_SIZE, width: GUTTER_BUTTON_SIZE }}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
@@ -183,7 +189,7 @@ export default function SqlEditorWithGutter({
                           void onExecuteStatement(stmt.sql);
                         }}
                       >
-                        <Play className="h-3 w-3" fill="currentColor" strokeWidth={0} />
+                        <Play className="h-2.5 w-2.5" fill="currentColor" strokeWidth={0} />
                       </button>
                     );
                     })() : null}

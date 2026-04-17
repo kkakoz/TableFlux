@@ -10,6 +10,7 @@ import {
   AssistRequest,
   type AssistResponse,
   type ConnectionMeta,
+  DataMigrationBatchRequest,
   type ExecuteSQLRequest,
   GroupCreateRequest,
   GroupUpdateRequest,
@@ -74,6 +75,12 @@ export const api = {
     DatabaseService.GetTableSchema(new TableSchemaRequest(req)),
   explainSQL: (req: any) => DatabaseService.ExplainSQL(req),
   migrateTableData: (req: Record<string, unknown>) => DatabaseService.MigrateTableData(req as any),
+  startDataMigration: (req: Record<string, unknown>) =>
+    DatabaseService.StartDataMigration(new DataMigrationBatchRequest(req as any)),
+  getDataMigrationJob: (jobId: string) =>
+    DatabaseService.GetDataMigrationJob(jobId),
+  cancelDataMigrationJob: (jobId: string) =>
+    DatabaseService.CancelDataMigrationJob(jobId),
 
   listTasks: () => TaskService.ListTasks(),
 

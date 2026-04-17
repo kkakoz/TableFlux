@@ -14,6 +14,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -26,15 +27,32 @@ type DatabaseService struct {
 	pools      map[string]*sql.DB
 	running    map[string]context.CancelFunc
 	defaultRLS int
+
+	migrationMu     sync.Mutex
+	migrationJobs   map[string]*dataMigrationJob
+	migrationRunner func(context.Context, DataMigrationRequest) (DataMigrationResult, error)
+}
+
+type dataMigrationJob struct {
+	id          string
+	req         DataMigrationBatchRequest
+	status      string
+	workerCount int
+	tables      []DataMigrationTableStatus
+	cancel      context.CancelFunc
+	startedAt   time.Time
+	endedAt     time.Time
+	message     string
 }
 
 func NewDatabaseService(store *DataStore, secrets *SecretService) *DatabaseService {
 	return &DatabaseService{
-		store:      store,
-		secrets:    secrets,
-		pools:      map[string]*sql.DB{},
-		running:    map[string]context.CancelFunc{},
-		defaultRLS: 5000,
+		store:         store,
+		secrets:       secrets,
+		pools:         map[string]*sql.DB{},
+		running:       map[string]context.CancelFunc{},
+		defaultRLS:    5000,
+		migrationJobs: map[string]*dataMigrationJob{},
 	}
 }
 
@@ -735,7 +753,167 @@ func (s *DatabaseService) GetTableSchema(req TableSchemaRequest) (TableSchema, e
 	return schema, nil
 }
 
+func (s *DatabaseService) StartDataMigration(req DataMigrationBatchRequest) (DataMigrationJobSnapshot, error) {
+	if req.SourceConnectionID == "" || req.TargetConnectionID == "" {
+		return DataMigrationJobSnapshot{}, errors.New("sourceConnectionId and targetConnectionId are required")
+	}
+	if req.SourceDatabase == "" || req.TargetDatabase == "" {
+		return DataMigrationJobSnapshot{}, errors.New("sourceDatabase and targetDatabase are required")
+	}
+
+	tables := uniqueNonEmpty(req.SourceTables)
+	if len(tables) == 0 {
+		return DataMigrationJobSnapshot{}, errors.New("sourceTables is required")
+	}
+	req.SourceTables = tables
+	req.WorkerCount = clampMigrationWorkerCount(req.WorkerCount)
+	req.BatchSize = normalizeMigrationBatchSize(req.BatchSize)
+	if req.WorkerCount > len(tables) {
+		req.WorkerCount = len(tables)
+	}
+
+	if targetConn, _, err := s.getPool(req.TargetConnectionID, req.TargetDatabase); err != nil {
+		return DataMigrationJobSnapshot{}, err
+	} else if targetConn.ReadOnlyFlag {
+		return DataMigrationJobSnapshot{}, errors.New("target connection is read-only")
+	}
+	if _, _, err := s.getPool(req.SourceConnectionID, req.SourceDatabase); err != nil {
+		return DataMigrationJobSnapshot{}, err
+	}
+
+	now := time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &dataMigrationJob{
+		id:          uuid.NewString(),
+		req:         req,
+		status:      "running",
+		workerCount: req.WorkerCount,
+		cancel:      cancel,
+		startedAt:   now,
+		tables:      make([]DataMigrationTableStatus, 0, len(tables)),
+	}
+	for _, table := range tables {
+		job.tables = append(job.tables, DataMigrationTableStatus{
+			Table:       table,
+			TargetTable: table,
+			Status:      "pending",
+		})
+	}
+
+	s.migrationMu.Lock()
+	s.migrationJobs[job.id] = job
+	s.migrationMu.Unlock()
+
+	go s.runDataMigrationJob(ctx, job.id)
+
+	return s.snapshotMigrationJob(job), nil
+}
+
+func (s *DatabaseService) GetDataMigrationJob(jobID string) (DataMigrationJobSnapshot, error) {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	job := s.migrationJobs[jobID]
+	if job == nil {
+		return DataMigrationJobSnapshot{}, errors.New("migration job not found")
+	}
+	return s.snapshotMigrationJobLocked(job), nil
+}
+
+func (s *DatabaseService) CancelDataMigrationJob(jobID string) error {
+	s.migrationMu.Lock()
+	job := s.migrationJobs[jobID]
+	if job == nil {
+		s.migrationMu.Unlock()
+		return errors.New("migration job not found")
+	}
+	if job.status == "running" {
+		job.status = "canceled"
+		job.message = "Migration canceled"
+		job.endedAt = time.Now()
+		for i := range job.tables {
+			if job.tables[i].Status == "pending" || job.tables[i].Status == "running" {
+				job.tables[i].Status = "canceled"
+				job.tables[i].EndedAt = job.endedAt
+			}
+		}
+	}
+	cancel := job.cancel
+	s.migrationMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return nil
+}
+
+func (s *DatabaseService) runDataMigrationJob(ctx context.Context, jobID string) {
+	s.migrationMu.Lock()
+	job := s.migrationJobs[jobID]
+	if job == nil {
+		s.migrationMu.Unlock()
+		return
+	}
+	req := job.req
+	workerCount := job.workerCount
+	s.migrationMu.Unlock()
+
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for table := range jobs {
+				if ctx.Err() != nil {
+					s.markMigrationTableCanceled(jobID, table)
+					continue
+				}
+				s.markMigrationTableRunning(jobID, table)
+				tableReq := DataMigrationRequest{
+					SourceConnectionID: req.SourceConnectionID,
+					SourceDatabase:     req.SourceDatabase,
+					SourceSchema:       req.SourceSchema,
+					SourceTable:        table,
+					TargetConnectionID: req.TargetConnectionID,
+					TargetDatabase:     req.TargetDatabase,
+					TargetSchema:       req.TargetSchema,
+					TargetTable:        table,
+					TruncateTarget:     req.TruncateTarget,
+					BatchSize:          req.BatchSize,
+				}
+				result, err := s.runSingleMigration(ctx, tableReq)
+				if err != nil {
+					s.markMigrationTableFailed(jobID, table, err)
+					continue
+				}
+				s.markMigrationTableSuccess(jobID, table, result)
+			}
+		}()
+	}
+
+	for _, table := range req.SourceTables {
+		if ctx.Err() != nil {
+			s.markMigrationTableCanceled(jobID, table)
+			continue
+		}
+		jobs <- table
+	}
+	close(jobs)
+	wg.Wait()
+	s.finishMigrationJob(jobID)
+}
+
+func (s *DatabaseService) runSingleMigration(ctx context.Context, req DataMigrationRequest) (DataMigrationResult, error) {
+	if s.migrationRunner != nil {
+		return s.migrationRunner(ctx, req)
+	}
+	return s.migrateTableData(ctx, req)
+}
+
 func (s *DatabaseService) MigrateTableData(req DataMigrationRequest) (DataMigrationResult, error) {
+	return s.migrateTableData(context.Background(), req)
+}
+
+func (s *DatabaseService) migrateTableData(ctx context.Context, req DataMigrationRequest) (DataMigrationResult, error) {
 	if req.SourceConnectionID == "" || req.TargetConnectionID == "" {
 		return DataMigrationResult{}, errors.New("sourceConnectionId and targetConnectionId are required")
 	}
@@ -761,50 +939,58 @@ func (s *DatabaseService) MigrateTableData(req DataMigrationRequest) (DataMigrat
 	srcTableRef := tableRef(srcConn.Driver, req.SourceSchema, req.SourceTable)
 	dstTableRef := tableRef(targetConn.Driver, req.TargetSchema, req.TargetTable)
 
-	rows, err := srcDB.Query(fmt.Sprintf("SELECT * FROM %s", srcTableRef))
+	sourceSchema, err := s.GetTableSchema(TableSchemaRequest{
+		ConnectionID: req.SourceConnectionID,
+		Database:     req.SourceDatabase,
+		Schema:       req.SourceSchema,
+		Table:        req.SourceTable,
+	})
+	if err != nil {
+		return DataMigrationResult{}, err
+	}
+	if len(sourceSchema.Columns) == 0 {
+		return DataMigrationResult{MigratedRows: 0, Message: "No columns to migrate"}, nil
+	}
+	columns := tableSchemaColumnNames(sourceSchema.Columns)
+	if len(columns) == 0 {
+		return DataMigrationResult{MigratedRows: 0, Message: "No columns to migrate"}, nil
+	}
+	if err := ensureMigrationTargetTable(ctx, dstDB, targetConn, req, sourceSchema); err != nil {
+		return DataMigrationResult{}, err
+	}
+
+	rows, err := srcDB.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoteColumns(srcConn.Driver, columns), ","), srcTableRef))
 	if err != nil {
 		return DataMigrationResult{}, err
 	}
 	defer rows.Close()
 
-	columns, err := rows.Columns()
-	if err != nil {
-		return DataMigrationResult{}, err
-	}
-	if len(columns) == 0 {
-		return DataMigrationResult{MigratedRows: 0, Message: "No columns to migrate"}, nil
-	}
-
-	tx, err := dstDB.Begin()
+	tx, err := dstDB.BeginTx(ctx, nil)
 	if err != nil {
 		return DataMigrationResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	if req.TruncateTarget {
-		if _, err := tx.Exec(fmt.Sprintf("TRUNCATE TABLE %s", dstTableRef)); err != nil {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s", dstTableRef)); err != nil {
 			return DataMigrationResult{}, err
 		}
 	}
 
-	colSQL := quoteColumns(targetConn.Driver, columns)
-	holders := make([]string, 0, len(columns))
-	for i := range columns {
-		holders = append(holders, placeholder(targetConn.Driver, i+1))
-	}
-	insertSQL := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
-		dstTableRef,
-		strings.Join(colSQL, ","),
-		strings.Join(holders, ","),
-	)
-	stmt, err := tx.Prepare(insertSQL)
-	if err != nil {
-		return DataMigrationResult{}, err
-	}
-	defer stmt.Close()
-
 	migrated := int64(0)
+	batchSize := migrationBatchSize(targetConn.Driver, len(columns), req.BatchSize)
+	batch := make([][]any, 0, batchSize)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := execMigrationInsertBatch(ctx, tx, targetConn.Driver, dstTableRef, columns, batch); err != nil {
+			return err
+		}
+		migrated += int64(len(batch))
+		batch = batch[:0]
+		return nil
+	}
 	for rows.Next() {
 		values := make([]any, len(columns))
 		refs := make([]any, len(columns))
@@ -814,12 +1000,17 @@ func (s *DatabaseService) MigrateTableData(req DataMigrationRequest) (DataMigrat
 		if err := rows.Scan(refs...); err != nil {
 			return DataMigrationResult{}, err
 		}
-		if _, err := stmt.Exec(values...); err != nil {
-			return DataMigrationResult{}, err
+		batch = append(batch, values)
+		if len(batch) >= batchSize {
+			if err := flush(); err != nil {
+				return DataMigrationResult{}, err
+			}
 		}
-		migrated++
 	}
 	if err := rows.Err(); err != nil {
+		return DataMigrationResult{}, err
+	}
+	if err := flush(); err != nil {
 		return DataMigrationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -830,6 +1021,359 @@ func (s *DatabaseService) MigrateTableData(req DataMigrationRequest) (DataMigrat
 		MigratedRows: migrated,
 		Message:      fmt.Sprintf("Migration completed, %d rows copied", migrated),
 	}, nil
+}
+
+func ensureMigrationTargetTable(ctx context.Context, db *sql.DB, targetConn ConnectionMeta, req DataMigrationRequest, sourceSchema TableSchema) error {
+	exists, err := migrationTargetTableExists(ctx, db, targetConn, req.TargetDatabase, req.TargetSchema, req.TargetTable)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	ddl := buildMigrationCreateTableSQL(targetConn.Driver, req.TargetSchema, req.TargetTable, sourceSchema)
+	_, err = db.ExecContext(ctx, ddl)
+	return err
+}
+
+func migrationTargetTableExists(ctx context.Context, db *sql.DB, conn ConnectionMeta, database, schema, table string) (bool, error) {
+	if conn.Driver == "mysql" {
+		dbName := fallback(database, conn.DefaultDB)
+		var count int
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE = 'BASE TABLE'`, dbName, table).Scan(&count)
+		return count > 0, err
+	}
+	schemaName := fallback(schema, "public")
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2 AND table_type = 'BASE TABLE'`, schemaName, table).Scan(&count)
+	return count > 0, err
+}
+
+func buildMigrationCreateTableSQL(driver, schema, table string, sourceSchema TableSchema) string {
+	defs := make([]string, 0, len(sourceSchema.Columns)+1)
+	for _, col := range sourceSchema.Columns {
+		parts := []string{quoteIdentifier(driver, col.Name), migrationColumnType(driver, col)}
+		if col.AutoIncrement && driver == "mysql" {
+			parts = append(parts, "AUTO_INCREMENT")
+		}
+		if !col.Nullable || col.PrimaryKey {
+			parts = append(parts, "NOT NULL")
+		}
+		defs = append(defs, strings.Join(parts, " "))
+	}
+	if len(sourceSchema.PrimaryKey) > 0 {
+		defs = append(defs, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(quoteColumns(driver, sourceSchema.PrimaryKey), ",")))
+	}
+	return fmt.Sprintf("CREATE TABLE %s (%s)", tableRef(driver, schema, table), strings.Join(defs, ","))
+}
+
+func tableSchemaColumnNames(columns []TableColumnSchema) []string {
+	names := make([]string, 0, len(columns))
+	for _, col := range columns {
+		name := strings.TrimSpace(col.Name)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func migrationColumnType(driver string, col TableColumnSchema) string {
+	raw := strings.ToLower(strings.TrimSpace(col.Type))
+	if raw == "" {
+		return "TEXT"
+	}
+	if driver == "mysql" {
+		return migrationColumnTypeForMySQL(raw, col.AutoIncrement)
+	}
+	return migrationColumnTypeForPostgres(raw, col.AutoIncrement)
+}
+
+func migrationColumnTypeForMySQL(raw string, autoIncrement bool) string {
+	if autoIncrement {
+		if strings.Contains(raw, "big") {
+			return "BIGINT"
+		}
+		return "INT"
+	}
+	switch {
+	case strings.Contains(raw, "bigserial"), strings.Contains(raw, "bigint"):
+		return "BIGINT"
+	case strings.Contains(raw, "smallserial"), strings.Contains(raw, "smallint"):
+		return "SMALLINT"
+	case strings.Contains(raw, "serial"), strings.Contains(raw, "integer"), raw == "int":
+		return "INT"
+	case strings.Contains(raw, "boolean"), raw == "bool":
+		return "BOOLEAN"
+	case strings.Contains(raw, "double precision"):
+		return "DOUBLE"
+	case strings.Contains(raw, "real"):
+		return "FLOAT"
+	case strings.Contains(raw, "numeric"), strings.Contains(raw, "decimal"):
+		return "DECIMAL"
+	case strings.Contains(raw, "timestamp"):
+		return "TIMESTAMP"
+	case raw == "date":
+		return "DATE"
+	case strings.Contains(raw, "time"):
+		return "TIME"
+	case strings.Contains(raw, "json"):
+		return "JSON"
+	case strings.Contains(raw, "bytea"), strings.Contains(raw, "blob"), strings.Contains(raw, "binary"):
+		return "LONGBLOB"
+	case strings.Contains(raw, "char"), strings.Contains(raw, "varchar"), strings.Contains(raw, "character varying"):
+		if strings.Contains(raw, "(") {
+			return strings.ToUpper(strings.ReplaceAll(raw, "character varying", "varchar"))
+		}
+		return "VARCHAR(255)"
+	case strings.Contains(raw, "text"):
+		return "LONGTEXT"
+	default:
+		return strings.ToUpper(raw)
+	}
+}
+
+func migrationColumnTypeForPostgres(raw string, autoIncrement bool) string {
+	if autoIncrement {
+		if strings.Contains(raw, "big") {
+			return "BIGSERIAL"
+		}
+		return "SERIAL"
+	}
+	switch {
+	case strings.Contains(raw, "bigint"):
+		return "BIGINT"
+	case strings.Contains(raw, "smallint"):
+		return "SMALLINT"
+	case strings.Contains(raw, "tinyint"), strings.Contains(raw, "mediumint"), strings.Contains(raw, "int"):
+		return "INTEGER"
+	case strings.Contains(raw, "bool"), raw == "bit(1)":
+		return "BOOLEAN"
+	case strings.Contains(raw, "double"):
+		return "DOUBLE PRECISION"
+	case strings.Contains(raw, "float"):
+		return "REAL"
+	case strings.Contains(raw, "decimal"), strings.Contains(raw, "numeric"):
+		return "NUMERIC"
+	case strings.Contains(raw, "datetime"), strings.Contains(raw, "timestamp"):
+		return "TIMESTAMP"
+	case raw == "date":
+		return "DATE"
+	case strings.HasPrefix(raw, "time"):
+		return "TIME"
+	case strings.Contains(raw, "json"):
+		return "JSONB"
+	case strings.Contains(raw, "blob"), strings.Contains(raw, "binary"), strings.Contains(raw, "bytea"):
+		return "BYTEA"
+	case strings.Contains(raw, "varchar"):
+		return strings.ToUpper(regexp.MustCompile(`(?i)varchar`).ReplaceAllString(raw, "VARCHAR"))
+	case strings.Contains(raw, "char"):
+		return "VARCHAR(255)"
+	case strings.Contains(raw, "text"), strings.Contains(raw, "enum"), strings.Contains(raw, "set"):
+		return "TEXT"
+	default:
+		return strings.ToUpper(raw)
+	}
+}
+
+func migrationDefaultValueAllowed(driver, value string) bool {
+	v := strings.TrimSpace(strings.ToLower(value))
+	if v == "" || v == "null" {
+		return false
+	}
+	if driver == "postgres" && strings.Contains(v, "::") {
+		return false
+	}
+	return true
+}
+
+func normalizeMigrationBatchSize(size int) int {
+	switch size {
+	case 200, 500, 1000:
+		return size
+	default:
+		return 500
+	}
+}
+
+func migrationBatchSize(driver string, columnCount, requested int) int {
+	if columnCount <= 0 {
+		return 1
+	}
+	size := normalizeMigrationBatchSize(requested)
+	if driver == "postgres" {
+		limit := 60000 / columnCount
+		if limit < size {
+			size = limit
+		}
+	}
+	if size < 1 {
+		return 1
+	}
+	return size
+}
+
+func execMigrationInsertBatch(ctx context.Context, tx *sql.Tx, driver, dstTableRef string, columns []string, rows [][]any) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	colSQL := quoteColumns(driver, columns)
+	valueGroups := make([]string, 0, len(rows))
+	args := make([]any, 0, len(rows)*len(columns))
+	argPos := 1
+	for _, row := range rows {
+		holders := make([]string, 0, len(columns))
+		for i := range columns {
+			holders = append(holders, placeholder(driver, argPos))
+			args = append(args, row[i])
+			argPos++
+		}
+		valueGroups = append(valueGroups, "("+strings.Join(holders, ",")+")")
+	}
+	insertSQL := fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES %s",
+		dstTableRef,
+		strings.Join(colSQL, ","),
+		strings.Join(valueGroups, ","),
+	)
+	_, err := tx.ExecContext(ctx, insertSQL, args...)
+	return err
+}
+
+func (s *DatabaseService) markMigrationTableRunning(jobID, table string) {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	job := s.migrationJobs[jobID]
+	if job == nil || job.status != "running" {
+		return
+	}
+	if idx := migrationTableIndex(job, table); idx >= 0 && job.tables[idx].Status == "pending" {
+		job.tables[idx].Status = "running"
+		job.tables[idx].StartedAt = time.Now()
+	}
+}
+
+func (s *DatabaseService) markMigrationTableSuccess(jobID, table string, result DataMigrationResult) {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	job := s.migrationJobs[jobID]
+	if job == nil || job.status == "canceled" {
+		return
+	}
+	if idx := migrationTableIndex(job, table); idx >= 0 {
+		job.tables[idx].Status = "success"
+		job.tables[idx].MigratedRows = result.MigratedRows
+		job.tables[idx].Message = result.Message
+		job.tables[idx].Error = ""
+		job.tables[idx].EndedAt = time.Now()
+	}
+}
+
+func (s *DatabaseService) markMigrationTableFailed(jobID, table string, err error) {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	job := s.migrationJobs[jobID]
+	if job == nil {
+		return
+	}
+	if idx := migrationTableIndex(job, table); idx >= 0 {
+		if job.status == "canceled" {
+			job.tables[idx].Status = "canceled"
+			job.tables[idx].Error = "Migration canceled"
+			job.tables[idx].EndedAt = time.Now()
+			return
+		}
+		job.tables[idx].Status = "failed"
+		job.tables[idx].Error = err.Error()
+		job.tables[idx].EndedAt = time.Now()
+	}
+}
+
+func (s *DatabaseService) markMigrationTableCanceled(jobID, table string) {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	job := s.migrationJobs[jobID]
+	if job == nil {
+		return
+	}
+	if idx := migrationTableIndex(job, table); idx >= 0 && (job.tables[idx].Status == "pending" || job.tables[idx].Status == "running") {
+		job.tables[idx].Status = "canceled"
+		job.tables[idx].Error = "Migration canceled"
+		job.tables[idx].EndedAt = time.Now()
+	}
+}
+
+func (s *DatabaseService) finishMigrationJob(jobID string) {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	job := s.migrationJobs[jobID]
+	if job == nil || job.status != "running" {
+		return
+	}
+	snapshot := s.snapshotMigrationJobLocked(job)
+	job.endedAt = time.Now()
+	if snapshot.Failed > 0 {
+		job.status = "failed"
+		job.message = fmt.Sprintf("Migration completed with errors: %d succeeded, %d failed", snapshot.Success, snapshot.Failed)
+		return
+	}
+	job.status = "success"
+	job.message = fmt.Sprintf("Migration completed: %d tables succeeded", snapshot.Success)
+}
+
+func (s *DatabaseService) snapshotMigrationJob(job *dataMigrationJob) DataMigrationJobSnapshot {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	return s.snapshotMigrationJobLocked(job)
+}
+
+func (s *DatabaseService) snapshotMigrationJobLocked(job *dataMigrationJob) DataMigrationJobSnapshot {
+	tables := make([]DataMigrationTableStatus, len(job.tables))
+	copy(tables, job.tables)
+	snapshot := DataMigrationJobSnapshot{
+		JobID:       job.id,
+		Status:      job.status,
+		WorkerCount: job.workerCount,
+		BatchSize:   job.req.BatchSize,
+		Total:       len(tables),
+		Tables:      tables,
+		StartedAt:   job.startedAt,
+		EndedAt:     job.endedAt,
+		Message:     job.message,
+	}
+	for _, table := range tables {
+		switch table.Status {
+		case "pending":
+			snapshot.Pending++
+		case "running":
+			snapshot.Running++
+		case "success":
+			snapshot.Success++
+		case "failed":
+			snapshot.Failed++
+		}
+	}
+	return snapshot
+}
+
+func migrationTableIndex(job *dataMigrationJob, table string) int {
+	for i := range job.tables {
+		if job.tables[i].Table == table {
+			return i
+		}
+	}
+	return -1
+}
+
+func clampMigrationWorkerCount(count int) int {
+	if count < 1 {
+		return 2
+	}
+	if count > 8 {
+		return 8
+	}
+	return count
 }
 
 func (s *DatabaseService) getPool(connectionID, overrideDB string) (ConnectionMeta, *sql.DB, error) {
@@ -1050,6 +1594,20 @@ func contains(items []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func uniqueNonEmpty(items []string) []string {
+	seen := make(map[string]bool, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 // sortedNonKeyColumns returns non-PK column names in stable order for SET / preview.

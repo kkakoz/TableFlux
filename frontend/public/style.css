@@ -1479,6 +1479,260 @@ th {
   padding-left: 6px;
 }
 
+.migration-panel {
+  width: min(1180px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+}
+
+.migration-head h3 {
+  margin: 0;
+}
+
+.migration-subtitle {
+  margin: 4px 0 0;
+  color: var(--sub);
+  font-size: 12px;
+}
+
+.migration-config {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel, #fff);
+}
+
+.migration-config label,
+.migration-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--sub);
+}
+
+.migration-config select,
+.migration-config input,
+.migration-search {
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+.migration-check {
+  justify-content: end;
+  flex-direction: row !important;
+  align-items: center;
+  padding-bottom: 6px;
+}
+
+.migration-check input {
+  width: 14px;
+  height: 14px;
+}
+
+.migration-picker-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.migration-section {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.migration-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.migration-section-head h4 {
+  margin: 0 0 2px;
+}
+
+.migration-section-head span {
+  color: var(--sub);
+  font-size: 12px;
+}
+
+.migration-search {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.migration-table-list {
+  height: 210px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.migration-table-list.target {
+  height: 250px;
+}
+
+.migration-table-option {
+  height: 28px;
+  min-height: 28px;
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.migration-table-option:hover {
+  background: var(--accent-weak);
+}
+
+.migration-table-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.migration-table-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.migration-table-option.view {
+  color: var(--sub);
+}
+
+.migration-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.migration-progress {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.migration-progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.migration-progress-top span {
+  color: var(--sub);
+}
+
+.migration-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #eef2f7;
+  margin-bottom: 10px;
+}
+
+.migration-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 160ms ease;
+}
+
+.migration-status-table {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.migration-status-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.3fr) 90px 80px minmax(180px, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.migration-status-row:last-child {
+  border-bottom: 0;
+}
+
+.migration-status-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.migration-status-row.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: var(--sub);
+  font-weight: 600;
+}
+
+.migration-status-row.pending {
+  color: #64748b;
+}
+
+.migration-status-row.running {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.migration-status-row.success {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.migration-status-row.failed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.migration-status-row.canceled {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.migration-message {
+  margin: 10px 0 0;
+  color: var(--sub);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 1100px) {
   .studio-layout {
     display: block;
@@ -1508,5 +1762,14 @@ th {
 
   .migration-grid {
     grid-template-columns: 1fr;
+  }
+
+  .migration-config,
+  .migration-picker-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .migration-status-row {
+    grid-template-columns: minmax(120px, 1fr) 72px 64px minmax(120px, 1fr);
   }
 }

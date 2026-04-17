@@ -92,6 +92,33 @@ export type TableSchemaRequest = {
   table: string;
 };
 
+export type DataMigrationTableStatus = {
+  table: string;
+  targetTable: string;
+  status: "pending" | "running" | "success" | "failed" | "canceled";
+  migratedRows: number;
+  message: string;
+  error: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+};
+
+export type DataMigrationJobSnapshot = {
+  jobId: string;
+  status: "running" | "success" | "failed" | "canceled";
+  workerCount: number;
+  batchSize: number;
+  total: number;
+  pending: number;
+  running: number;
+  success: number;
+  failed: number;
+  tables: DataMigrationTableStatus[];
+  startedAt?: string | null;
+  endedAt?: string | null;
+  message: string;
+};
+
 export type AIConfig = {
   apiKey: string;
   apiUrl: string;
