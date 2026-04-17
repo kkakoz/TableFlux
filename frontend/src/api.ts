@@ -13,6 +13,7 @@ import {
   type ExecuteSQLRequest,
   GroupCreateRequest,
   GroupUpdateRequest,
+  PreviewInsertRowsRequest,
   type QueryResultPage,
   SaveStudioSessionRequest,
   type StudioSessionSnapshot,
@@ -59,6 +60,10 @@ export const api = {
     ),
   queryTablePage: (req: TableQueryRequest | Record<string, unknown>) =>
     DatabaseService.QueryTablePage(req instanceof TableQueryRequest ? req : new TableQueryRequest(req)) as Promise<QueryResultPage>,
+  previewInsertRowsSQL: (req: PreviewInsertRowsRequest | Record<string, unknown>) =>
+    DatabaseService.PreviewInsertRowsSQL(
+      req instanceof PreviewInsertRowsRequest ? req : new PreviewInsertRowsRequest(req),
+    ),
   previewUpdateRowsSQL: (req: UpdateRowsRequest | Record<string, unknown>) => DatabaseService.PreviewUpdateRowsSQL(req as any),
   updateRows: (req: UpdateRowsRequest | Record<string, unknown>) => DatabaseService.UpdateRows(req as any),
   getSettings: () => SettingsService.GetSettings(),

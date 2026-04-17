@@ -34,6 +34,8 @@ export {
     GroupReorderRequest,
     GroupUpdateRequest,
     InsertRowsRequest,
+    InsertRowsSQLPreviewResponse,
+    PreviewInsertRowsRequest,
     QueryResultPage,
     SQLExecutionResult,
     SaveStudioSessionRequest,

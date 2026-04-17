@@ -43,7 +43,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import ConnectionManager from "./components/connection-manager/ConnectionManager";
 import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal";
 import { formatCellForTimezone, readDisplayTimezone } from "./components/studio/timezoneDisplay";
-import { TableQueryRequest, UpdateRowsRequest } from "../bindings/changeme";
+import { PreviewInsertRowsRequest, TableQueryRequest, UpdateRowsRequest } from "../bindings/changeme";
 import SqlEditorWithGutter from "./components/studio/SqlEditorWithGutter";
 import SqlHistoryModal from "./components/studio/SqlHistoryModal";
 import { pushSqlHistory, readSqlHistory } from "./utils/sqlHistory";
@@ -109,6 +109,72 @@ type WorkbenchTab = {
 };
 
 const CLIENT_GRID_PAGE_SIZE = 10000;
+
+type GridTableContext = {
+  connectionId: string;
+  database: string;
+  schema: string;
+  table: string;
+};
+
+type GridContextMenuContext = {
+  cell: Item;
+  colIndex: number;
+  rowIndex: number;
+  columnName?: string;
+  rowData?: Record<string, unknown>;
+  isLongTextCell: boolean;
+  isPrimaryKeyColumn: boolean;
+  canEditCell: boolean;
+  canCopyRowAsInsert: boolean;
+  canCopyCellAsUpdate: boolean;
+};
+
+type GridContextMenuState = {
+  left: number;
+  top: number;
+  context: GridContextMenuContext;
+};
+
+type GridContextMenuEntry =
+  | {
+      kind: "action";
+      label: string;
+      onSelect: () => void | Promise<void>;
+      disabled?: boolean;
+    }
+  | {
+      kind: "submenu";
+      label: string;
+      children: GridContextMenuEntry[];
+      disabled?: boolean;
+    }
+  | {
+      kind: "separator";
+    };
+
+function clampGridContextMenuPosition(x: number, y: number) {
+  const w = 340;
+  const h = 260;
+  const margin = 8;
+  const nx = Math.min(x, window.innerWidth - w - margin);
+  const ny = Math.min(y, window.innerHeight - h - margin);
+  return { left: Math.max(margin, nx), top: Math.max(margin, ny) };
+}
+
+function normalizeContextMenuEntries(entries: GridContextMenuEntry[]): GridContextMenuEntry[] {
+  const normalized: GridContextMenuEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "separator") {
+      if (normalized.length === 0 || normalized[normalized.length - 1]?.kind === "separator") continue;
+      normalized.push(entry);
+      continue;
+    }
+    normalized.push(entry);
+  }
+  while (normalized[normalized.length - 1]?.kind === "separator") normalized.pop();
+  return normalized;
+}
 
 function coerceEditedCellValue(original: unknown, text: string): unknown {
   const t = text.trim();
@@ -2435,6 +2501,16 @@ function StudioView({ groupId }: { groupId: string }) {
                             primaryKeyColumns={activeTab.tablePrimaryKey ?? []}
                             onCellValueChange={handleTableCellEdit}
                             dirtyFields={activeTab.tableEditDirtyRows}
+                            tableContext={
+                              activeConnectionId && activeTab.contextTable
+                                ? {
+                                    connectionId: activeConnectionId,
+                                    database: activeTab.contextDb,
+                                    schema: sqlDialect === "postgres" ? "public" : "",
+                                    table: activeTab.contextTable,
+                                  }
+                                : undefined
+                            }
                           />
                         </div>
                       ) : (
@@ -2771,6 +2847,7 @@ function VirtualResultGrid({
   onCellValueChange,
   /** 行索引 → 已修改列名→值（仅用于背景高亮，与表编辑 dirty 一致） */
   dirtyFields,
+  tableContext,
 }: {
   columns: string[];
   /** 与 columns 同序；缺省时不提供「查看完整内容」 */
@@ -2788,11 +2865,12 @@ function VirtualResultGrid({
   primaryKeyColumns?: string[];
   onCellValueChange?: (rowIndex: number, columnName: string, value: unknown) => void;
   dirtyFields?: Record<number, Record<string, unknown>>;
+  tableContext?: GridTableContext;
 }) {
   const PAGE_SIZE = 10000;
   const [page, setPage] = useState(1);
   const [gridSize, setGridSize] = useState({ width: 900, height: 360 });
-  const [ctxMenu, setCtxMenu] = useState<{ left: number; top: number } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<GridContextMenuState | null>(null);
   const [sortMenu, setSortMenu] = useState<{ colIndex: number; bounds: HeaderBounds } | null>(null);
   const [cellDetail, setCellDetail] = useState<{ column: string; rowLabel: string; text: string } | null>(null);
   /** 列拖拽调整后的宽度；列集合变化时重置为默认 */
@@ -2800,7 +2878,6 @@ function VirtualResultGrid({
   const gridHostRef = useRef<HTMLDivElement | null>(null);
   const dataEditorRef = useRef<DataEditorRef | null>(null);
   const lastContextClientPosRef = useRef<{ x: number; y: number } | null>(null);
-  const contextMenuCellRef = useRef<Item | null>(null);
   /** glide-data-grid 在任意两次 mouseup 间隔 <500ms 都会设 isDoubleClick，不校验是否同一格；此处自行判定「同格双击」 */
   const lastCellPointerRef = useRef<{ col: number; row: number; at: number } | null>(null);
 
@@ -2908,6 +2985,40 @@ function VirtualResultGrid({
     [columns, columnTypes, pageRows, displayTimezone, markerStart],
   );
 
+  const buildContextMenuContext = useCallback(
+    (cell: Item): GridContextMenuContext => {
+      const [colIndex, rowIndex] = cell;
+      const rowData = rowIndex >= 0 ? pageRows[rowIndex] : undefined;
+      const columnName = colIndex >= 0 && colIndex < columns.length ? columns[colIndex] : undefined;
+      const isPrimaryKeyColumn = Boolean(columnName && pkSet.has(columnName));
+      const canEditCell = Boolean(editable && onCellValueChange && columnName && rowData && !isPrimaryKeyColumn);
+      const isLongTextCell = Boolean(
+        columnName && rowData && isExpandableLongTextColumnType(columnTypes?.[colIndex]),
+      );
+      const canCopyRowAsInsert = Boolean(tableContext && rowData);
+      const canCopyCellAsUpdate = Boolean(
+        tableContext &&
+          rowData &&
+          columnName &&
+          primaryKeyColumns.length > 0 &&
+          !isPrimaryKeyColumn,
+      );
+      return {
+        cell,
+        colIndex,
+        rowIndex,
+        columnName,
+        rowData,
+        isLongTextCell,
+        isPrimaryKeyColumn,
+        canEditCell,
+        canCopyRowAsInsert,
+        canCopyCellAsUpdate,
+      };
+    },
+    [columns, columnTypes, editable, onCellValueChange, pageRows, pkSet, primaryKeyColumns.length, tableContext],
+  );
+
   const gridColumns: GridColumn[] = useMemo(
     () =>
       columns.map((name, i) => {
@@ -2983,6 +3094,197 @@ function VirtualResultGrid({
       onCopyError(`复制失败: ${String(e)}`);
     }
   };
+
+  const copyText = useCallback(
+    async (text: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (e) {
+        onCopyError(`复制失败: ${String(e)}`);
+      }
+    },
+    [onCopyError],
+  );
+
+  const updateContextCellValue = useCallback(
+    (value: unknown) => {
+      const ctx = ctxMenu?.context;
+      if (!ctx || !ctx.canEditCell || !ctx.columnName || !onCellValueChange) return;
+      onCellValueChange(ctx.rowIndex, ctx.columnName, value);
+    },
+    [ctxMenu, onCellValueChange],
+  );
+
+  const copyContextRowAsInsert = useCallback(async () => {
+    const ctx = ctxMenu?.context;
+    if (!ctx?.rowData || !tableContext) return;
+    try {
+      const payloadRow = Object.fromEntries(columns.map((name) => [name, ctx.rowData?.[name]]));
+      const result = await api.previewInsertRowsSQL(
+        new PreviewInsertRowsRequest({
+          connectionId: tableContext.connectionId,
+          database: tableContext.database,
+          schema: tableContext.schema,
+          table: tableContext.table,
+          columns,
+          rows: [payloadRow],
+        }),
+      );
+      const sql = result.statements?.[0];
+      if (!sql) throw new Error("未生成 INSERT 语句");
+      await copyText(sql);
+    } catch (e) {
+      onCopyError(`复制 INSERT 语句失败: ${String(e)}`);
+    }
+  }, [columns, copyText, ctxMenu, onCopyError, tableContext]);
+
+  const copyContextCellAsUpdate = useCallback(async () => {
+    const ctx = ctxMenu?.context;
+    if (!ctx?.rowData || !ctx.columnName || !tableContext || primaryKeyColumns.length === 0 || ctx.isPrimaryKeyColumn) {
+      return;
+    }
+    try {
+      const result = await api.previewUpdateRowsSQL(
+        new UpdateRowsRequest({
+          connectionId: tableContext.connectionId,
+          database: tableContext.database,
+          schema: tableContext.schema,
+          table: tableContext.table,
+          keyColumns: primaryKeyColumns,
+          rows: [buildUpdateRowPayload(ctx.rowData, { [ctx.columnName]: ctx.rowData[ctx.columnName] }, primaryKeyColumns)],
+        }),
+      );
+      const sql = result.statements?.[0];
+      if (!sql) throw new Error("未生成 UPDATE 语句");
+      await copyText(sql);
+    } catch (e) {
+      onCopyError(`复制 UPDATE 语句失败: ${String(e)}`);
+    }
+  }, [copyText, ctxMenu, onCopyError, primaryKeyColumns, tableContext]);
+
+  const contextMenuEntries = useMemo(() => {
+    const ctx = ctxMenu?.context;
+    if (!ctx) return [] as GridContextMenuEntry[];
+    const entries: GridContextMenuEntry[] = [];
+    if (ctx.isLongTextCell) {
+      entries.push({
+        kind: "action",
+        label: "查看完整内容",
+        onSelect: () => openCellDetail(ctx.cell),
+      });
+    }
+    if (tableContext) {
+      if (entries.length > 0) entries.push({ kind: "separator" });
+      entries.push(
+        {
+          kind: "action",
+          label: "设置为空字符串",
+          disabled: !ctx.canEditCell,
+          onSelect: () => updateContextCellValue(""),
+        },
+        {
+          kind: "action",
+          label: "设置为 NULL",
+          disabled: !ctx.canEditCell,
+          onSelect: () => updateContextCellValue(null),
+        },
+        {
+          kind: "action",
+          label: "生成 UUID",
+          disabled: !ctx.canEditCell,
+          onSelect: () => updateContextCellValue(crypto.randomUUID()),
+        },
+        { kind: "separator" },
+      );
+    }
+    entries.push(
+      {
+        kind: "action",
+        label: "复制",
+        onSelect: copySelection,
+      },
+      {
+        kind: "submenu",
+        label: "复制为",
+        disabled: !ctx.canCopyRowAsInsert && !ctx.canCopyCellAsUpdate,
+        children: [
+          {
+            kind: "action",
+            label: "Insert 语句",
+            disabled: !ctx.canCopyRowAsInsert,
+            onSelect: copyContextRowAsInsert,
+          },
+          {
+            kind: "action",
+            label: "Update 语句",
+            disabled: !ctx.canCopyCellAsUpdate,
+            onSelect: copyContextCellAsUpdate,
+          },
+        ],
+      },
+    );
+    return normalizeContextMenuEntries(entries);
+  }, [
+    copyContextCellAsUpdate,
+    copyContextRowAsInsert,
+    copySelection,
+    ctxMenu,
+    openCellDetail,
+    tableContext,
+    updateContextCellValue,
+  ]);
+
+  const runMenuAction = useCallback((action: () => void | Promise<void>) => {
+    void Promise.resolve(action()).finally(() => setCtxMenu(null));
+  }, []);
+
+  const renderMenuEntries = useCallback(
+    (entries: GridContextMenuEntry[], level = 0): JSX.Element[] =>
+      entries.map((entry, index) => {
+        const key = `${level}-${index}-${entry.kind}`;
+        if (entry.kind === "separator") {
+          return <div key={key} className="context-menu-divider" role="separator" />;
+        }
+        if (entry.kind === "submenu") {
+          const children = normalizeContextMenuEntries(entry.children);
+          const disabled = Boolean(
+            entry.disabled ||
+              children.length === 0 ||
+              children.every((child) => child.kind !== "separator" && Boolean(child.disabled)),
+          );
+          return (
+            <div key={key} className={`context-menu-group ${disabled ? "is-disabled" : ""}`}>
+              <button
+                type="button"
+                className="context-menu-item context-menu-item-submenu"
+                disabled={disabled}
+                onClick={(e) => e.preventDefault()}
+              >
+                <span>{entry.label}</span>
+                <ChevronRight className="context-menu-arrow" strokeWidth={2.25} />
+              </button>
+              {!disabled ? (
+                <div className="context-submenu" role="menu">
+                  {renderMenuEntries(children, level + 1)}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+        return (
+          <button
+            key={key}
+            type="button"
+            className="context-menu-item"
+            disabled={entry.disabled}
+            onClick={() => runMenuAction(entry.onSelect)}
+          >
+            {entry.label}
+          </button>
+        );
+      }),
+    [runMenuAction],
+  );
 
   return (
     <div className="result-grid-root">
@@ -3060,16 +3362,17 @@ function VirtualResultGrid({
           onCellActivated={editable ? () => void dataEditorRef.current?.focus() : undefined}
           onCellContextMenu={(cell, event) => {
             event.preventDefault();
-            contextMenuCellRef.current = cell;
             const pos = lastContextClientPosRef.current;
             if (pos) {
-              setCtxMenu({ left: pos.x, top: pos.y });
+              const next = clampGridContextMenuPosition(pos.x, pos.y);
+              setCtxMenu({ ...next, context: buildContextMenuContext(cell) });
               return;
             }
             const host = gridHostRef.current;
             if (!host) return;
             const rect = host.getBoundingClientRect();
-            setCtxMenu({ left: rect.left + event.localEventX, top: rect.top + event.localEventY });
+            const next = clampGridContextMenuPosition(rect.left + event.localEventX, rect.top + event.localEventY);
+            setCtxMenu({ ...next, context: buildContextMenuContext(cell) });
           }}
         />
       </div>
@@ -3094,25 +3397,7 @@ function VirtualResultGrid({
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {contextMenuCellRef.current != null &&
-          contextMenuCellRef.current[1] >= 0 &&
-          contextMenuCellRef.current[0] >= 0 &&
-          isExpandableLongTextColumnType(columnTypes?.[contextMenuCellRef.current[0]]) ? (
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                const c = contextMenuCellRef.current;
-                if (c) openCellDetail(c);
-                setCtxMenu(null);
-              }}
-            >
-              查看完整内容
-            </button>
-          ) : null}
-          <button className="context-menu-item" onClick={() => void copySelection().then(() => setCtxMenu(null))}>
-            复制
-          </button>
+          {renderMenuEntries(contextMenuEntries)}
         </div>
       ) : null}
       {sortMenu && onSortOrder

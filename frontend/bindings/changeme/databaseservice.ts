@@ -80,17 +80,26 @@ export function MigrateTableData(req: $models.DataMigrationRequest): $Cancellabl
 }
 
 /**
+ * PreviewInsertRowsSQL 生成与 InsertRows 语义接近的 INSERT 语句（展示用字符串字面量已按方言转义）。
+ */
+export function PreviewInsertRowsSQL(req: $models.PreviewInsertRowsRequest): $CancellablePromise<$models.InsertRowsSQLPreviewResponse> {
+    return $Call.ByID(2443741732, req).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+/**
  * PreviewUpdateRowsSQL 生成与 UpdateRows 语义一致的 UPDATE 语句（展示用字符串字面量已按方言转义）。
  */
 export function PreviewUpdateRowsSQL(req: $models.UpdateRowsRequest): $CancellablePromise<$models.UpdateRowsSQLPreviewResponse> {
     return $Call.ByID(418193440, req).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
 export function QueryTablePage(req: $models.TableQueryRequest): $CancellablePromise<$models.QueryResultPage> {
     return $Call.ByID(2696123903, req).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -106,5 +115,6 @@ const $$createType1 = $models.TableSchema.createFrom;
 const $$createType2 = $models.SchemaObject.createFrom;
 const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $models.DataMigrationResult.createFrom;
-const $$createType5 = $models.UpdateRowsSQLPreviewResponse.createFrom;
-const $$createType6 = $models.QueryResultPage.createFrom;
+const $$createType5 = $models.InsertRowsSQLPreviewResponse.createFrom;
+const $$createType6 = $models.UpdateRowsSQLPreviewResponse.createFrom;
+const $$createType7 = $models.QueryResultPage.createFrom;

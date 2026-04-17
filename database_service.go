@@ -509,6 +509,29 @@ func (s *DatabaseService) InsertRows(req InsertRowsRequest) (SQLExecutionResult,
 	return SQLExecutionResult{RowsAffected: ra, Message: fmt.Sprintf("Inserted %d rows", ra)}, nil
 }
 
+// PreviewInsertRowsSQL 生成与 InsertRows 语义接近的 INSERT 语句（展示用字符串字面量已按方言转义）。
+func (s *DatabaseService) PreviewInsertRowsSQL(req PreviewInsertRowsRequest) (InsertRowsSQLPreviewResponse, error) {
+	conn, _, err := s.getPool(req.ConnectionID, req.Database)
+	if err != nil {
+		return InsertRowsSQLPreviewResponse{}, err
+	}
+	if len(req.Rows) == 0 {
+		return InsertRowsSQLPreviewResponse{}, errors.New("rows are required")
+	}
+	columns := req.Columns
+	if len(columns) == 0 {
+		columns = sortedKeys(req.Rows[0])
+	}
+	if len(columns) == 0 {
+		return InsertRowsSQLPreviewResponse{}, errors.New("row columns are required")
+	}
+	stmts := make([]string, 0, len(req.Rows))
+	for _, row := range req.Rows {
+		stmts = append(stmts, buildInsertStatementPreview(conn.Driver, req.Schema, req.Table, columns, row)+";")
+	}
+	return InsertRowsSQLPreviewResponse{Statements: stmts}, nil
+}
+
 func (s *DatabaseService) UpdateRows(req UpdateRowsRequest) (SQLExecutionResult, error) {
 	conn, db, err := s.getPool(req.ConnectionID, req.Database)
 	if err != nil {
@@ -1053,6 +1076,16 @@ func buildUpdateStatementPreview(driver, schema, table string, keyColumns []stri
 		whereParts = append(whereParts, fmt.Sprintf("%s=%s", quoteIdentifier(driver, k), formatSQLLiteralForPreview(driver, row[k])))
 	}
 	return fmt.Sprintf("UPDATE %s SET %s WHERE %s", tref, strings.Join(setParts, ", "), strings.Join(whereParts, " AND "))
+}
+
+func buildInsertStatementPreview(driver, schema, table string, columns []string, row map[string]any) string {
+	tref := tableRef(driver, schema, table)
+	colList := quoteColumns(driver, columns)
+	values := make([]string, 0, len(columns))
+	for _, col := range columns {
+		values = append(values, formatSQLLiteralForPreview(driver, row[col]))
+	}
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", tref, strings.Join(colList, ", "), strings.Join(values, ", "))
 }
 
 func sqlStringLiteralForPreview(driver, s string) string {

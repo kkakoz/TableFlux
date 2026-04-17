@@ -641,6 +641,86 @@ export class InsertRowsRequest {
     }
 }
 
+/**
+ * InsertRowsSQLPreviewResponse 与 PreviewInsertRowsRequest 一致时生成的可展示 INSERT 文本（按方言转义字面量）。
+ */
+export class InsertRowsSQLPreviewResponse {
+    "statements": string[];
+
+    /** Creates a new InsertRowsSQLPreviewResponse instance. */
+    constructor($$source: Partial<InsertRowsSQLPreviewResponse> = {}) {
+        if (!("statements" in $$source)) {
+            this["statements"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new InsertRowsSQLPreviewResponse instance from a string or object.
+     */
+    static createFrom($$source: any = {}): InsertRowsSQLPreviewResponse {
+        const $$createField0_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("statements" in $$parsedSource) {
+            $$parsedSource["statements"] = $$createField0_0($$parsedSource["statements"]);
+        }
+        return new InsertRowsSQLPreviewResponse($$parsedSource as Partial<InsertRowsSQLPreviewResponse>);
+    }
+}
+
+/**
+ * PreviewInsertRowsRequest 用于生成可复制的 INSERT 预览语句。
+ */
+export class PreviewInsertRowsRequest {
+    "connectionId": string;
+    "database": string;
+    "schema": string;
+    "table": string;
+    "columns": string[];
+    "rows": { [_ in string]?: any }[];
+
+    /** Creates a new PreviewInsertRowsRequest instance. */
+    constructor($$source: Partial<PreviewInsertRowsRequest> = {}) {
+        if (!("connectionId" in $$source)) {
+            this["connectionId"] = "";
+        }
+        if (!("database" in $$source)) {
+            this["database"] = "";
+        }
+        if (!("schema" in $$source)) {
+            this["schema"] = "";
+        }
+        if (!("table" in $$source)) {
+            this["table"] = "";
+        }
+        if (!("columns" in $$source)) {
+            this["columns"] = [];
+        }
+        if (!("rows" in $$source)) {
+            this["rows"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PreviewInsertRowsRequest instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PreviewInsertRowsRequest {
+        const $$createField4_0 = $$createType0;
+        const $$createField5_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("columns" in $$parsedSource) {
+            $$parsedSource["columns"] = $$createField4_0($$parsedSource["columns"]);
+        }
+        if ("rows" in $$parsedSource) {
+            $$parsedSource["rows"] = $$createField5_0($$parsedSource["rows"]);
+        }
+        return new PreviewInsertRowsRequest($$parsedSource as Partial<PreviewInsertRowsRequest>);
+    }
+}
+
 export class QueryResultPage {
     "columns": string[];
     "columnTypes"?: string[];

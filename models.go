@@ -132,6 +132,16 @@ type InsertRowsRequest struct {
 	Rows         []map[string]any `json:"rows"`
 }
 
+// PreviewInsertRowsRequest 用于生成可复制的 INSERT 预览语句。
+type PreviewInsertRowsRequest struct {
+	ConnectionID string           `json:"connectionId"`
+	Database     string           `json:"database"`
+	Schema       string           `json:"schema"`
+	Table        string           `json:"table"`
+	Columns      []string         `json:"columns"`
+	Rows         []map[string]any `json:"rows"`
+}
+
 type UpdateRowsRequest struct {
 	ConnectionID string           `json:"connectionId"`
 	Database     string           `json:"database"`
@@ -143,6 +153,11 @@ type UpdateRowsRequest struct {
 
 // UpdateRowsSQLPreviewResponse 与 UpdateRows 请求一致时生成的可展示 UPDATE 文本（按方言转义字面量）。
 type UpdateRowsSQLPreviewResponse struct {
+	Statements []string `json:"statements"`
+}
+
+// InsertRowsSQLPreviewResponse 与 PreviewInsertRowsRequest 一致时生成的可展示 INSERT 文本（按方言转义字面量）。
+type InsertRowsSQLPreviewResponse struct {
 	Statements []string `json:"statements"`
 }
 
