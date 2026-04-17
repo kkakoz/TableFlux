@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  CompactSelection,
   DataEditor,
   GridCellKind,
   GridColumnMenuIcon,
@@ -10,6 +11,7 @@ import {
   type GridColumn,
   type Item,
   type GridCell,
+  type GridSelection,
   type Theme,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
@@ -123,11 +125,14 @@ type GridContextMenuContext = {
   rowIndex: number;
   columnName?: string;
   rowData?: Record<string, unknown>;
+  selectedRowIndexes: number[];
+  selectedColumnIndexes: number[];
+  selectedEditableColumnNames: string[];
   isLongTextCell: boolean;
   isPrimaryKeyColumn: boolean;
-  canEditCell: boolean;
-  canCopyRowAsInsert: boolean;
-  canCopyCellAsUpdate: boolean;
+  canEditSelection: boolean;
+  canCopyRowsAsInsert: boolean;
+  canCopySelectionAsUpdate: boolean;
 };
 
 type GridContextMenuState = {
@@ -174,6 +179,13 @@ function normalizeContextMenuEntries(entries: GridContextMenuEntry[]): GridConte
   }
   while (normalized[normalized.length - 1]?.kind === "separator") normalized.pop();
   return normalized;
+}
+
+function createEmptyGridSelection(): GridSelection {
+  return {
+    columns: CompactSelection.empty(),
+    rows: CompactSelection.empty(),
+  };
 }
 
 function coerceEditedCellValue(original: unknown, text: string): unknown {
@@ -2870,6 +2882,7 @@ function VirtualResultGrid({
   const PAGE_SIZE = 10000;
   const [page, setPage] = useState(1);
   const [gridSize, setGridSize] = useState({ width: 900, height: 360 });
+  const [gridSelection, setGridSelection] = useState<GridSelection>(() => createEmptyGridSelection());
   const [ctxMenu, setCtxMenu] = useState<GridContextMenuState | null>(null);
   const [sortMenu, setSortMenu] = useState<{ colIndex: number; bounds: HeaderBounds } | null>(null);
   const [cellDetail, setCellDetail] = useState<{ column: string; rowLabel: string; text: string } | null>(null);
@@ -2893,6 +2906,10 @@ function VirtualResultGrid({
   useEffect(() => {
     setPage(1);
   }, [rows, columns.join("|"), serverMode]);
+
+  useEffect(() => {
+    setGridSelection(createEmptyGridSelection());
+  }, [columns.join("|"), rowCount, serverMode, safePage]);
 
   const columnsSig = columns.join("|");
   const typeSig = (columnTypes ?? []).join("|");
@@ -2985,23 +3002,65 @@ function VirtualResultGrid({
     [columns, columnTypes, pageRows, displayTimezone, markerStart],
   );
 
+  const resolveSelectedIndexes = useCallback(
+    (fallbackCell: Item) => {
+      const rowSet = new Set<number>();
+      const colSet = new Set<number>();
+      const addRect = (rect: { x: number; y: number; width: number; height: number } | undefined) => {
+        if (!rect) return;
+        const startCol = Math.max(0, rect.x);
+        const endCol = Math.min(columns.length, rect.x + rect.width);
+        const startRow = Math.max(0, rect.y);
+        const endRow = Math.min(rowCount, rect.y + rect.height);
+        for (let c = startCol; c < endCol; c += 1) colSet.add(c);
+        for (let r = startRow; r < endRow; r += 1) rowSet.add(r);
+      };
+
+      addRect(gridSelection.current?.range as { x: number; y: number; width: number; height: number } | undefined);
+      for (const rect of gridSelection.current?.rangeStack ?? []) {
+        addRect(rect as { x: number; y: number; width: number; height: number });
+      }
+      for (const rowIndex of gridSelection.rows.toArray()) {
+        if (rowIndex >= 0 && rowIndex < rowCount) rowSet.add(rowIndex);
+      }
+      for (const colIndex of gridSelection.columns.toArray()) {
+        if (colIndex >= 0 && colIndex < columns.length) colSet.add(colIndex);
+      }
+
+      if (rowSet.size === 0 && fallbackCell[1] >= 0 && fallbackCell[1] < rowCount) rowSet.add(fallbackCell[1]);
+      if (colSet.size === 0 && fallbackCell[0] >= 0 && fallbackCell[0] < columns.length) colSet.add(fallbackCell[0]);
+
+      return {
+        rowIndexes: [...rowSet].sort((a, b) => a - b),
+        colIndexes: [...colSet].sort((a, b) => a - b),
+      };
+    },
+    [columns.length, gridSelection, rowCount],
+  );
+
   const buildContextMenuContext = useCallback(
     (cell: Item): GridContextMenuContext => {
       const [colIndex, rowIndex] = cell;
+      const { rowIndexes: selectedRowIndexes, colIndexes: selectedColumnIndexes } = resolveSelectedIndexes(cell);
       const rowData = rowIndex >= 0 ? pageRows[rowIndex] : undefined;
       const columnName = colIndex >= 0 && colIndex < columns.length ? columns[colIndex] : undefined;
       const isPrimaryKeyColumn = Boolean(columnName && pkSet.has(columnName));
-      const canEditCell = Boolean(editable && onCellValueChange && columnName && rowData && !isPrimaryKeyColumn);
+      const selectedEditableColumnNames = selectedColumnIndexes
+        .map((index) => columns[index])
+        .filter((name): name is string => Boolean(name && !pkSet.has(name)));
+      const canEditSelection = Boolean(
+        editable && onCellValueChange && selectedRowIndexes.length > 0 && selectedEditableColumnNames.length > 0,
+      );
       const isLongTextCell = Boolean(
         columnName && rowData && isExpandableLongTextColumnType(columnTypes?.[colIndex]),
       );
-      const canCopyRowAsInsert = Boolean(tableContext && rowData);
-      const canCopyCellAsUpdate = Boolean(
+      const canCopyRowsAsInsert = Boolean(tableContext && selectedRowIndexes.length > 0);
+      const canCopySelectionAsUpdate = Boolean(
         tableContext &&
-          rowData &&
-          columnName &&
+          selectedRowIndexes.length > 0 &&
+          selectedEditableColumnNames.length > 0 &&
           primaryKeyColumns.length > 0 &&
-          !isPrimaryKeyColumn,
+          (!columnName || !isPrimaryKeyColumn || selectedEditableColumnNames.length > 0),
       );
       return {
         cell,
@@ -3009,14 +3068,27 @@ function VirtualResultGrid({
         rowIndex,
         columnName,
         rowData,
+        selectedRowIndexes,
+        selectedColumnIndexes,
+        selectedEditableColumnNames,
         isLongTextCell,
         isPrimaryKeyColumn,
-        canEditCell,
-        canCopyRowAsInsert,
-        canCopyCellAsUpdate,
+        canEditSelection,
+        canCopyRowsAsInsert,
+        canCopySelectionAsUpdate,
       };
     },
-    [columns, columnTypes, editable, onCellValueChange, pageRows, pkSet, primaryKeyColumns.length, tableContext],
+    [
+      columns,
+      columnTypes,
+      editable,
+      onCellValueChange,
+      pageRows,
+      pkSet,
+      primaryKeyColumns.length,
+      resolveSelectedIndexes,
+      tableContext,
+    ],
   );
 
   const gridColumns: GridColumn[] = useMemo(
@@ -3106,20 +3178,24 @@ function VirtualResultGrid({
     [onCopyError],
   );
 
-  const updateContextCellValue = useCallback(
-    (value: unknown) => {
+  const updateContextSelectionValue = useCallback(
+    (value: unknown | ((rowIndex: number, columnName: string) => unknown)) => {
       const ctx = ctxMenu?.context;
-      if (!ctx || !ctx.canEditCell || !ctx.columnName || !onCellValueChange) return;
-      onCellValueChange(ctx.rowIndex, ctx.columnName, value);
+      if (!ctx || !ctx.canEditSelection || !onCellValueChange) return;
+      for (const rowIndex of ctx.selectedRowIndexes) {
+        for (const columnName of ctx.selectedEditableColumnNames) {
+          const nextValue = typeof value === "function" ? value(rowIndex, columnName) : value;
+          onCellValueChange(rowIndex, columnName, nextValue);
+        }
+      }
     },
     [ctxMenu, onCellValueChange],
   );
 
-  const copyContextRowAsInsert = useCallback(async () => {
+  const copyContextRowsAsInsert = useCallback(async () => {
     const ctx = ctxMenu?.context;
-    if (!ctx?.rowData || !tableContext) return;
+    if (!tableContext || !ctx || ctx.selectedRowIndexes.length === 0) return;
     try {
-      const payloadRow = Object.fromEntries(columns.map((name) => [name, ctx.rowData?.[name]]));
       const result = await api.previewInsertRowsSQL(
         new PreviewInsertRowsRequest({
           connectionId: tableContext.connectionId,
@@ -3127,20 +3203,28 @@ function VirtualResultGrid({
           schema: tableContext.schema,
           table: tableContext.table,
           columns,
-          rows: [payloadRow],
+          rows: ctx.selectedRowIndexes.map((rowIndex) =>
+            Object.fromEntries(columns.map((name) => [name, pageRows[rowIndex]?.[name]])),
+          ),
         }),
       );
-      const sql = result.statements?.[0];
+      const sql = (result.statements ?? []).join("\n\n");
       if (!sql) throw new Error("未生成 INSERT 语句");
       await copyText(sql);
     } catch (e) {
       onCopyError(`复制 INSERT 语句失败: ${String(e)}`);
     }
-  }, [columns, copyText, ctxMenu, onCopyError, tableContext]);
+  }, [columns, copyText, ctxMenu, onCopyError, pageRows, tableContext]);
 
-  const copyContextCellAsUpdate = useCallback(async () => {
+  const copyContextSelectionAsUpdate = useCallback(async () => {
     const ctx = ctxMenu?.context;
-    if (!ctx?.rowData || !ctx.columnName || !tableContext || primaryKeyColumns.length === 0 || ctx.isPrimaryKeyColumn) {
+    if (
+      !ctx ||
+      !tableContext ||
+      primaryKeyColumns.length === 0 ||
+      ctx.selectedRowIndexes.length === 0 ||
+      ctx.selectedEditableColumnNames.length === 0
+    ) {
       return;
     }
     try {
@@ -3151,16 +3235,22 @@ function VirtualResultGrid({
           schema: tableContext.schema,
           table: tableContext.table,
           keyColumns: primaryKeyColumns,
-          rows: [buildUpdateRowPayload(ctx.rowData, { [ctx.columnName]: ctx.rowData[ctx.columnName] }, primaryKeyColumns)],
+          rows: ctx.selectedRowIndexes.map((rowIndex) => {
+            const rowData = pageRows[rowIndex];
+            const patch = Object.fromEntries(
+              ctx.selectedEditableColumnNames.map((columnName) => [columnName, rowData?.[columnName]]),
+            );
+            return buildUpdateRowPayload(rowData ?? {}, patch, primaryKeyColumns);
+          }),
         }),
       );
-      const sql = result.statements?.[0];
+      const sql = (result.statements ?? []).join("\n\n");
       if (!sql) throw new Error("未生成 UPDATE 语句");
       await copyText(sql);
     } catch (e) {
       onCopyError(`复制 UPDATE 语句失败: ${String(e)}`);
     }
-  }, [copyText, ctxMenu, onCopyError, primaryKeyColumns, tableContext]);
+  }, [copyText, ctxMenu, onCopyError, pageRows, primaryKeyColumns, tableContext]);
 
   const contextMenuEntries = useMemo(() => {
     const ctx = ctxMenu?.context;
@@ -3179,20 +3269,20 @@ function VirtualResultGrid({
         {
           kind: "action",
           label: "设置为空字符串",
-          disabled: !ctx.canEditCell,
-          onSelect: () => updateContextCellValue(""),
+          disabled: !ctx.canEditSelection,
+          onSelect: () => updateContextSelectionValue(""),
         },
         {
           kind: "action",
           label: "设置为 NULL",
-          disabled: !ctx.canEditCell,
-          onSelect: () => updateContextCellValue(null),
+          disabled: !ctx.canEditSelection,
+          onSelect: () => updateContextSelectionValue(null),
         },
         {
           kind: "action",
           label: "生成 UUID",
-          disabled: !ctx.canEditCell,
-          onSelect: () => updateContextCellValue(crypto.randomUUID()),
+          disabled: !ctx.canEditSelection,
+          onSelect: () => updateContextSelectionValue(() => crypto.randomUUID()),
         },
         { kind: "separator" },
       );
@@ -3206,32 +3296,32 @@ function VirtualResultGrid({
       {
         kind: "submenu",
         label: "复制为",
-        disabled: !ctx.canCopyRowAsInsert && !ctx.canCopyCellAsUpdate,
+        disabled: !ctx.canCopyRowsAsInsert && !ctx.canCopySelectionAsUpdate,
         children: [
           {
             kind: "action",
             label: "Insert 语句",
-            disabled: !ctx.canCopyRowAsInsert,
-            onSelect: copyContextRowAsInsert,
+            disabled: !ctx.canCopyRowsAsInsert,
+            onSelect: copyContextRowsAsInsert,
           },
           {
             kind: "action",
             label: "Update 语句",
-            disabled: !ctx.canCopyCellAsUpdate,
-            onSelect: copyContextCellAsUpdate,
+            disabled: !ctx.canCopySelectionAsUpdate,
+            onSelect: copyContextSelectionAsUpdate,
           },
         ],
       },
     );
     return normalizeContextMenuEntries(entries);
   }, [
-    copyContextCellAsUpdate,
-    copyContextRowAsInsert,
+    copyContextRowsAsInsert,
+    copyContextSelectionAsUpdate,
     copySelection,
     ctxMenu,
     openCellDetail,
     tableContext,
-    updateContextCellValue,
+    updateContextSelectionValue,
   ]);
 
   const runMenuAction = useCallback((action: () => void | Promise<void>) => {
@@ -3303,6 +3393,7 @@ function VirtualResultGrid({
           rows={rowCount}
           getCellContent={getCellContent}
           getCellsForSelection={true}
+          gridSelection={gridSelection}
           width={gridSize.width}
           height={gridSize.height}
           rowHeight={GRID_ROW_HEIGHT}
@@ -3317,6 +3408,8 @@ function VirtualResultGrid({
           /** single-click 与 Glide 内部 selection 同步存在竞态，reselect 读到的 cell 可能未更新，导致无法弹出编辑层；改用 second-click（两次点同一格）并与 editOnType + focus 配合实现「点选后输入」 */
           cellActivationBehavior={editable ? "second-click" : "double-click"}
           onColumnResize={onColumnResize}
+          onGridSelectionChange={setGridSelection}
+          onSelectionCleared={() => setGridSelection(createEmptyGridSelection())}
           onHeaderMenuClick={
             serverMode && onSortOrder
               ? (colIndex, bounds: HeaderBounds) => {
