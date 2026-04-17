@@ -113,6 +113,12 @@ export function QueryTablePage(req: $models.TableQueryRequest): $CancellableProm
     });
 }
 
+export function QuerySQLResultPage(req: $models.SQLResultPageRequest): $CancellablePromise<$models.QueryResultPage> {
+    return $Call.ByName("DatabaseService.QuerySQLResultPage", req).then(($result: any) => {
+        return $$createType8($result);
+    });
+}
+
 export function StartDataMigration(req: $models.DataMigrationBatchRequest): $CancellablePromise<$models.DataMigrationJobSnapshot> {
     return $Call.ByID(1188566404, req).then(($result: any) => {
         return $$createType1($result);

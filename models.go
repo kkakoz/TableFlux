@@ -75,6 +75,8 @@ type ExecuteSQLRequest struct {
 	Database     string `json:"database"`
 	SQL          string `json:"sql"`
 	RowLimit     int    `json:"rowLimit"`
+	PageOffset   int    `json:"pageOffset"`
+	PageLimit    int    `json:"pageLimit"`
 	TimeoutMs    int    `json:"timeoutMs"`
 	Mode         string `json:"mode"`
 	RequestID    string `json:"requestId"`
@@ -90,6 +92,9 @@ type SQLExecutionResult struct {
 	Truncated    bool             `json:"truncated"`
 	DurationMs   int64            `json:"durationMs"`
 	ExecLog      []string         `json:"execLog,omitempty"`
+	Total        int              `json:"total,omitempty"`
+	Offset       int              `json:"offset,omitempty"`
+	Limit        int              `json:"limit,omitempty"`
 }
 
 type QueryResultPage struct {
@@ -111,6 +116,12 @@ type TableQueryRequest struct {
 	Limit        int    `json:"limit"`
 	OrderBy      string `json:"orderBy"`
 	OrderDesc    bool   `json:"orderDesc"`
+}
+
+type SQLResultPageRequest struct {
+	RequestID string `json:"requestId"`
+	Offset    int    `json:"offset"`
+	Limit     int    `json:"limit"`
 }
 
 type ExplainSQLRequest struct {

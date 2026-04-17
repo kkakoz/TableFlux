@@ -26,11 +26,23 @@ type DatabaseService struct {
 	mu         sync.Mutex
 	pools      map[string]*sql.DB
 	running    map[string]context.CancelFunc
+	sqlResults map[string]cachedSQLResult
+	sqlOrder   []string
 	defaultRLS int
 
 	migrationMu     sync.Mutex
 	migrationJobs   map[string]*dataMigrationJob
 	migrationRunner func(context.Context, DataMigrationRequest) (DataMigrationResult, error)
+}
+
+type cachedSQLResult struct {
+	columns     []string
+	columnTypes []string
+	rows        []map[string]any
+	total       int
+	truncated   bool
+	durationMs  int64
+	createdAt   time.Time
 }
 
 type dataMigrationJob struct {
@@ -51,6 +63,7 @@ func NewDatabaseService(store *DataStore, secrets *SecretService) *DatabaseServi
 		secrets:       secrets,
 		pools:         map[string]*sql.DB{},
 		running:       map[string]context.CancelFunc{},
+		sqlResults:    map[string]cachedSQLResult{},
 		defaultRLS:    5000,
 		migrationJobs: map[string]*dataMigrationJob{},
 	}
@@ -58,6 +71,102 @@ func NewDatabaseService(store *DataStore, secrets *SecretService) *DatabaseServi
 
 func (s *DatabaseService) ServiceName() string {
 	return "DatabaseService"
+}
+
+const maxCachedSQLResults = 20
+
+func normalizePageBounds(offset, limit, defaultLimit, total int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit <= 0 {
+		limit = 5000
+	}
+	if offset > total {
+		offset = total
+	}
+	return offset, limit
+}
+
+func sliceResultRows(rows []map[string]any, offset, limit int) []map[string]any {
+	if offset >= len(rows) {
+		return []map[string]any{}
+	}
+	end := offset + limit
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return rows[offset:end]
+}
+
+func (s *DatabaseService) storeSQLResult(requestID string, columns, columnTypes []string, rows []map[string]any, truncated bool, durationMs int64) {
+	if strings.TrimSpace(requestID) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sqlResults[requestID] = cachedSQLResult{
+		columns:     columns,
+		columnTypes: columnTypes,
+		rows:        rows,
+		total:       len(rows),
+		truncated:   truncated,
+		durationMs:  durationMs,
+		createdAt:   time.Now(),
+	}
+	filtered := s.sqlOrder[:0]
+	for _, id := range s.sqlOrder {
+		if id != requestID {
+			filtered = append(filtered, id)
+		}
+	}
+	s.sqlOrder = append(filtered, requestID)
+	for len(s.sqlOrder) > maxCachedSQLResults {
+		oldest := s.sqlOrder[0]
+		s.sqlOrder = s.sqlOrder[1:]
+		delete(s.sqlResults, oldest)
+	}
+}
+
+func (s *DatabaseService) clearSQLResult(requestID string) {
+	if strings.TrimSpace(requestID) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sqlResults, requestID)
+	filtered := s.sqlOrder[:0]
+	for _, id := range s.sqlOrder {
+		if id != requestID {
+			filtered = append(filtered, id)
+		}
+	}
+	s.sqlOrder = filtered
+}
+
+func (s *DatabaseService) QuerySQLResultPage(req SQLResultPageRequest) (QueryResultPage, error) {
+	if strings.TrimSpace(req.RequestID) == "" {
+		return QueryResultPage{}, errors.New("requestId is required")
+	}
+	s.mu.Lock()
+	cached, ok := s.sqlResults[req.RequestID]
+	s.mu.Unlock()
+	if !ok {
+		return QueryResultPage{}, errors.New("query result is no longer available")
+	}
+	offset, limit := normalizePageBounds(req.Offset, req.Limit, s.defaultRLS, cached.total)
+	return QueryResultPage{
+		Columns:     cached.columns,
+		ColumnTypes: cached.columnTypes,
+		Rows:        sliceResultRows(cached.rows, offset, limit),
+		Total:       cached.total,
+		Offset:      offset,
+		Limit:       limit,
+		DurationMs:  cached.durationMs,
+	}, nil
 }
 
 func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult, error) {
@@ -155,20 +264,28 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 		if err := rows.Err(); err != nil {
 			return SQLExecutionResult{}, err
 		}
-		message := fmt.Sprintf("Query finished (%d rows)", len(resultRows))
+		durationMs := time.Since(started).Milliseconds()
+		total := len(resultRows)
+		pageOffset, pageLimit := normalizePageBounds(req.PageOffset, req.PageLimit, s.defaultRLS, total)
+		s.storeSQLResult(req.RequestID, displayCols, colTypes, resultRows, truncated, durationMs)
+		message := fmt.Sprintf("Query finished (%d rows)", total)
 		if truncated {
-			message = fmt.Sprintf("Query finished (%d rows, truncated by row limit)", len(resultRows))
+			message = fmt.Sprintf("Query finished (%d rows, truncated by row limit)", total)
 		}
 		return SQLExecutionResult{
 			Columns:     displayCols,
 			ColumnTypes: colTypes,
-			Rows:        resultRows,
+			Rows:        sliceResultRows(resultRows, pageOffset, pageLimit),
 			Message:     message,
 			Truncated:   truncated,
-			DurationMs:  time.Since(started).Milliseconds(),
+			DurationMs:  durationMs,
+			Total:       total,
+			Offset:      pageOffset,
+			Limit:       pageLimit,
 		}, nil
 	}
 
+	s.clearSQLResult(req.RequestID)
 	if conn.ReadOnlyFlag {
 		upper := strings.ToUpper(strings.TrimSpace(req.SQL))
 		if strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "UPDATE") || strings.HasPrefix(upper, "DELETE") || strings.HasPrefix(upper, "CREATE") || strings.HasPrefix(upper, "DROP") || strings.HasPrefix(upper, "ALTER") || strings.HasPrefix(upper, "TRUNCATE") {

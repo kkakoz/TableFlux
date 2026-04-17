@@ -99,6 +99,11 @@ type WorkbenchTab = {
 
   /** SQL 结果分页（客户端切片） */
   sqlGridPage?: number;
+  /** 后端 SQL 结果缓存 ID，用于按页读取全量查询集 */
+  sqlResultRequestId?: string;
+  sqlResultTotal?: number;
+  sqlResultOffset?: number;
+  sqlResultPageLimit?: number;
 
   /** 表标签：主键列（用于更新） */
   tablePrimaryKey?: string[];
@@ -1366,6 +1371,53 @@ function StudioView({ groupId }: { groupId: string }) {
     setActiveForDatabase(dbName, tableTabId);
   };
 
+  const loadSqlResultPage = async (tabId: string, requestId: string, page: number, limit: number) => {
+    if (!activeConnectionId) return;
+    const connectionId = activeConnectionId;
+    const dbName = selectedDatabase;
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.max(100, limit || CLIENT_GRID_PAGE_SIZE);
+    const offset = (safePage - 1) * safeLimit;
+    updateTabById(connectionId, dbName, tabId, (tab) => ({
+      ...tab,
+      sqlResultLoading: true,
+    }));
+    try {
+      const pageResult = await api.querySQLResultPage({ requestId, offset, limit: safeLimit });
+      updateTabById(connectionId, dbName, tabId, (tab) => {
+        if (tab.sqlResultRequestId !== requestId) return tab;
+        return {
+          ...tab,
+          result: {
+            ...(tab.result ?? {
+              rowsAffected: 0,
+              lastInsertId: 0,
+              message: "",
+              truncated: false,
+              durationMs: pageResult.durationMs,
+            }),
+            columns: pageResult.columns,
+            columnTypes: pageResult.columnTypes,
+            rows: pageResult.rows,
+            total: pageResult.total,
+            offset: pageResult.offset,
+            limit: pageResult.limit,
+          },
+          sqlGridPage: Math.floor(pageResult.offset / (pageResult.limit || safeLimit)) + 1,
+          sqlResultTotal: pageResult.total,
+          sqlResultOffset: pageResult.offset,
+          sqlResultPageLimit: pageResult.limit,
+          sqlResultLoading: false,
+          error: "",
+        };
+      });
+    } catch (e) {
+      updateTabById(connectionId, dbName, tabId, (tab) =>
+        tab.sqlResultRequestId === requestId ? { ...tab, sqlResultLoading: false, error: String(e) } : tab,
+      );
+    }
+  };
+
   useEffect(() => {
     if (tableFilter.trim() === "") return;
     const unloaded = dbTree.filter((db) => !db.loaded).map((db) => db.name);
@@ -1384,12 +1436,15 @@ function StudioView({ groupId }: { groupId: string }) {
     const requestId = createRequestId();
     beginSqlTabRequest(connectionId, dbName, tabId, requestId, trimmed);
     try {
+      const pageLimit = await resolveQueryLimit();
       const r = await api.executeSQL({
         connectionId,
         database: dbName,
         sql: trimmed,
         mode,
         rowLimit: -1,
+        pageOffset: 0,
+        pageLimit,
         timeoutMs: 30000,
         requestId,
       });
@@ -1401,6 +1456,10 @@ function StudioView({ groupId }: { groupId: string }) {
         error: "",
         lastExecutedSql: trimmed,
         sqlGridPage: 1,
+        sqlResultRequestId: r.rows ? requestId : "",
+        sqlResultTotal: r.total,
+        sqlResultOffset: r.offset,
+        sqlResultPageLimit: r.limit || pageLimit,
       }));
     } catch (e) {
       finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
@@ -1408,6 +1467,10 @@ function StudioView({ groupId }: { groupId: string }) {
         error: String(e),
         result: null,
         lastExecutedSql: trimmed,
+        sqlResultRequestId: "",
+        sqlResultTotal: undefined,
+        sqlResultOffset: undefined,
+        sqlResultPageLimit: undefined,
       }));
     }
   };
@@ -2378,12 +2441,14 @@ function StudioView({ groupId }: { groupId: string }) {
                           {(() => {
                             const rows = (activeTabResult.rows as Array<Record<string, unknown>>) ?? [];
                             const page = Math.max(1, activeTab?.sqlGridPage ?? 1);
-                            const totalPages = Math.max(1, Math.ceil(rows.length / CLIENT_GRID_PAGE_SIZE));
+                            const pageLimit = Math.max(1, activeTab?.sqlResultPageLimit ?? activeTabResult.limit ?? CLIENT_GRID_PAGE_SIZE);
+                            const totalRows = activeTab?.sqlResultTotal ?? activeTabResult.total ?? rows.length;
+                            const totalPages = Math.max(1, Math.ceil(totalRows / pageLimit));
                             const safePage = Math.min(page, totalPages);
-                            const start = (safePage - 1) * CLIENT_GRID_PAGE_SIZE;
-                            const end = Math.min(start + CLIENT_GRID_PAGE_SIZE, rows.length);
-                            const pageRows = rows.slice(start, end);
+                            const start = activeTab?.sqlResultOffset ?? activeTabResult.offset ?? (safePage - 1) * pageLimit;
+                            const pageRows = rows;
                             const busy = activeTab?.sqlResultLoading ?? false;
+                            const cacheRequestId = activeTab?.sqlResultRequestId ?? "";
                             return (
                               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
@@ -2411,13 +2476,13 @@ function StudioView({ groupId }: { groupId: string }) {
                                     <div className="min-w-0 pt-0.5 font-mono text-[13px] text-slate-600">
                                       <span className="text-slate-400">结果</span>{" "}
                                       <span className="text-[11px] tabular-nums text-slate-500">
-                                        {rows.length > CLIENT_GRID_PAGE_SIZE ? `${safePage} / ${totalPages} · ` : ""}
-                                        {Math.min(CLIENT_GRID_PAGE_SIZE, rows.length - start)}/{rows.length}
+                                        {totalRows > pageLimit ? `${safePage} / ${totalPages} · ` : ""}
+                                        {rows.length}/{totalRows}
                                       </span>
                                     </div>
                                   </div>
                                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                                    {rows.length > CLIENT_GRID_PAGE_SIZE ? (
+                                    {totalRows > pageLimit ? (
                                       <>
                                         <button
                                           type="button"
@@ -2425,12 +2490,8 @@ function StudioView({ groupId }: { groupId: string }) {
                                           aria-disabled={safePage <= 1 || busy}
                                           title={busy ? "加载中…" : safePage <= 1 ? "已是第一页" : "上一页"}
                                           onClick={() => {
-                                            if (busy) return;
-                                            upsertDatabaseTabs(selectedDatabase, (list) =>
-                                              list.map((t) =>
-                                                t.id === activeTab?.id ? { ...t, sqlGridPage: Math.max(1, safePage - 1) } : t,
-                                              ),
-                                            );
+                                            if (busy || !activeTab || !cacheRequestId) return;
+                                            void loadSqlResultPage(activeTab.id, cacheRequestId, Math.max(1, safePage - 1), pageLimit);
                                           }}
                                           className="tf-btn-icon-lg tf-btn-icon-bordered"
                                           disabled={safePage <= 1 || busy}
@@ -2443,12 +2504,8 @@ function StudioView({ groupId }: { groupId: string }) {
                                           aria-disabled={safePage >= totalPages || busy}
                                           title={busy ? "加载中…" : safePage >= totalPages ? "已是最后一页" : "下一页"}
                                           onClick={() => {
-                                            if (busy) return;
-                                            upsertDatabaseTabs(selectedDatabase, (list) =>
-                                              list.map((t) =>
-                                                t.id === activeTab?.id ? { ...t, sqlGridPage: Math.min(totalPages, safePage + 1) } : t,
-                                              ),
-                                            );
+                                            if (busy || !activeTab || !cacheRequestId) return;
+                                            void loadSqlResultPage(activeTab.id, cacheRequestId, Math.min(totalPages, safePage + 1), pageLimit);
                                           }}
                                           className="tf-btn-icon-lg tf-btn-icon-bordered"
                                           disabled={safePage >= totalPages || busy}

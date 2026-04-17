@@ -55,6 +55,8 @@ export const api = {
   focusMainWindow: () => StudioWindowService.FocusMainWindow(),
 
   executeSQL: (req: ExecuteSQLRequest | Record<string, unknown>) => DatabaseService.ExecuteSQL(req as any),
+  querySQLResultPage: (req: { requestId: string; offset: number; limit: number }) =>
+    DatabaseService.QuerySQLResultPage(req as any) as Promise<QueryResultPage>,
   cancelRunningQuery: (req: CancelRunningQueryRequest | Record<string, unknown>) =>
     DatabaseService.CancelRunningQuery(
       req instanceof CancelRunningQueryRequest ? req : new CancelRunningQueryRequest(req),

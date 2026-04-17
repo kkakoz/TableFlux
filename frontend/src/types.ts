@@ -45,6 +45,9 @@ export type ExecuteSQLResult = {
   truncated: boolean;
   durationMs: number;
   execLog?: string[];
+  total?: number;
+  offset?: number;
+  limit?: number;
 };
 
 export type StudioTabSnapshot = {

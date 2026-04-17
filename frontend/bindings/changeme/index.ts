@@ -41,6 +41,7 @@ export {
     PreviewInsertRowsRequest,
     QueryResultPage,
     SQLExecutionResult,
+    SQLResultPageRequest,
     SaveStudioSessionRequest,
     SchemaObject,
     Settings,

@@ -631,6 +631,8 @@ export class ExecuteSQLRequest {
     "database": string;
     "sql": string;
     "rowLimit": number;
+    "pageOffset": number;
+    "pageLimit": number;
     "timeoutMs": number;
     "mode": string;
     "requestId": string;
@@ -648,6 +650,12 @@ export class ExecuteSQLRequest {
         }
         if (!("rowLimit" in $$source)) {
             this["rowLimit"] = 0;
+        }
+        if (!("pageOffset" in $$source)) {
+            this["pageOffset"] = 0;
+        }
+        if (!("pageLimit" in $$source)) {
+            this["pageLimit"] = 0;
         }
         if (!("timeoutMs" in $$source)) {
             this["timeoutMs"] = 0;
@@ -976,6 +984,9 @@ export class SQLExecutionResult {
     "truncated": boolean;
     "durationMs": number;
     "execLog"?: string[];
+    "total"?: number;
+    "offset"?: number;
+    "limit"?: number;
 
     /** Creates a new SQLExecutionResult instance. */
     constructor($$source: Partial<SQLExecutionResult> = {}) {
@@ -1020,6 +1031,35 @@ export class SQLExecutionResult {
             $$parsedSource["execLog"] = $$createField8_0($$parsedSource["execLog"]);
         }
         return new SQLExecutionResult($$parsedSource as Partial<SQLExecutionResult>);
+    }
+}
+
+export class SQLResultPageRequest {
+    "requestId": string;
+    "offset": number;
+    "limit": number;
+
+    /** Creates a new SQLResultPageRequest instance. */
+    constructor($$source: Partial<SQLResultPageRequest> = {}) {
+        if (!("requestId" in $$source)) {
+            this["requestId"] = "";
+        }
+        if (!("offset" in $$source)) {
+            this["offset"] = 0;
+        }
+        if (!("limit" in $$source)) {
+            this["limit"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SQLResultPageRequest instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SQLResultPageRequest {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SQLResultPageRequest($$parsedSource as Partial<SQLResultPageRequest>);
     }
 }
 
