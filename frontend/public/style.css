@@ -1398,6 +1398,131 @@ th {
   margin-bottom: 10px;
 }
 
+.cell-detail-modal {
+  width: min(1080px, calc(100vw - 32px));
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.cell-detail-head {
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.cell-detail-title {
+  margin: 0 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgb(15, 23, 42);
+}
+
+.cell-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgb(100, 116, 139);
+}
+
+.cell-detail-meta span {
+  border: 1px solid rgb(226, 232, 240);
+  border-radius: 999px;
+  background: rgb(248, 250, 252);
+  padding: 2px 7px;
+}
+
+.cell-detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.cell-detail-format-btn {
+  min-height: 28px;
+  border: 1px solid rgb(226, 232, 240);
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 9px;
+  color: rgb(51, 65, 85);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.cell-detail-format-btn:hover {
+  background: rgb(248, 250, 252);
+}
+
+.cell-detail-format-btn.active {
+  border-color: rgb(37, 99, 235);
+  background: rgb(239, 246, 255);
+  color: rgb(29, 78, 216);
+}
+
+.cell-detail-error {
+  margin-bottom: 8px;
+  border: 1px solid rgb(254, 202, 202);
+  border-radius: 6px;
+  background: rgb(254, 242, 242);
+  padding: 7px 9px;
+  color: rgb(185, 28, 28);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cell-detail-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: min(58vh, 520px);
+  resize: vertical;
+  border: 1px solid rgb(203, 213, 225);
+  border-radius: 7px;
+  background: rgb(248, 250, 252);
+  padding: 10px;
+  color: rgb(15, 23, 42);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.cell-detail-textarea:focus {
+  border-color: rgb(37, 99, 235);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.cell-detail-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  border-top: 1px solid rgb(226, 232, 240);
+  padding-top: 10px;
+}
+
+.cell-detail-hint {
+  min-width: 0;
+  color: rgb(100, 116, 139);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.cell-detail-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .migration-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1484,8 +1609,18 @@ th {
   max-height: calc(100vh - 48px);
 }
 
+.migration-progress-panel {
+  width: min(980px, calc(100vw - 32px));
+}
+
 .migration-head h3 {
   margin: 0;
+}
+
+.migration-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .migration-subtitle {
@@ -1496,12 +1631,57 @@ th {
 
 .migration-config {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 10px;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel, #fff);
+}
+
+.migration-config label:nth-child(1) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.migration-config label:nth-child(4) {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.migration-config label:nth-child(2) {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.migration-config label:nth-child(5) {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.migration-config label:nth-child(3) {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.migration-config label:nth-child(6) {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.migration-config label:nth-child(7) {
+  grid-column: 1;
+  grid-row: 4;
+}
+
+.migration-config label:nth-child(8) {
+  grid-column: 2;
+  grid-row: 4;
+}
+
+.migration-config .migration-check {
+  grid-column: 1 / -1;
+  grid-row: 5;
 }
 
 .migration-config label,
@@ -1525,10 +1705,10 @@ th {
 }
 
 .migration-check {
-  justify-content: end;
+  justify-content: flex-start;
   flex-direction: row !important;
   align-items: center;
-  padding-bottom: 6px;
+  padding-bottom: 0;
 }
 
 .migration-check input {
@@ -1633,6 +1813,10 @@ th {
   border-radius: 8px;
   padding: 10px;
   background: #fff;
+}
+
+.migration-progress-standalone {
+  margin-top: 0;
 }
 
 .migration-progress-top {
@@ -1767,6 +1951,12 @@ th {
   .migration-config,
   .migration-picker-layout {
     grid-template-columns: 1fr;
+  }
+
+  .migration-config label:nth-child(n),
+  .migration-config .migration-check {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .migration-status-row {

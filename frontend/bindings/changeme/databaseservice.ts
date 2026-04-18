@@ -107,14 +107,14 @@ export function PreviewUpdateRowsSQL(req: $models.UpdateRowsRequest): $Cancellab
     });
 }
 
-export function QueryTablePage(req: $models.TableQueryRequest): $CancellablePromise<$models.QueryResultPage> {
-    return $Call.ByID(2696123903, req).then(($result: any) => {
+export function QuerySQLResultPage(req: $models.SQLResultPageRequest): $CancellablePromise<$models.QueryResultPage> {
+    return $Call.ByID(2193096934, req).then(($result: any) => {
         return $$createType8($result);
     });
 }
 
-export function QuerySQLResultPage(req: $models.SQLResultPageRequest): $CancellablePromise<$models.QueryResultPage> {
-    return $Call.ByName("DatabaseService.QuerySQLResultPage", req).then(($result: any) => {
+export function QueryTablePage(req: $models.TableQueryRequest): $CancellablePromise<$models.QueryResultPage> {
+    return $Call.ByID(2696123903, req).then(($result: any) => {
         return $$createType8($result);
     });
 }

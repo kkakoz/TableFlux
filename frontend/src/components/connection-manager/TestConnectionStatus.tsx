@@ -8,25 +8,29 @@ type Props = {
 export default function TestConnectionStatus({ phase, message }: Props) {
   if (phase === "idle" && !message) return null;
 
-  const styles =
+  const variant = phase === "idle" ? "info" : phase;
+  const title =
     phase === "loading"
-      ? "border-amber-200 bg-amber-50 text-amber-900"
+      ? "正在测试"
       : phase === "success"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+        ? "连接可用"
         : phase === "error"
-          ? "border-red-200 bg-red-50 text-red-900"
-          : "border-slate-200 bg-slate-50 text-slate-700";
+          ? "连接失败"
+          : "提示";
 
   return (
-    <div className={`rounded-lg border px-2.5 py-2 text-[12px] leading-snug ${styles}`}>
-      {phase === "loading" ? (
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
-          正在测试连接…
-        </span>
-      ) : (
-        message
-      )}
+    <div className={`tf-message-card tf-inline-message tf-message-${variant}`}>
+      <div className="tf-message-mark">
+        {phase === "loading" ? (
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        ) : (
+          <span className="h-2 w-2 rounded-full bg-current" />
+        )}
+      </div>
+      <div className="tf-message-content">
+        <div className="tf-message-title">{title}</div>
+        <div className="tf-message-text">{phase === "loading" ? "正在测试连接..." : message}</div>
+      </div>
     </div>
   );
 }

@@ -1773,6 +1773,25 @@ func sqlStringLiteralForPreview(driver, s string) string {
 	return "'" + s + "'"
 }
 
+func sqlTimeLiteralStringForPreview(t time.Time) string {
+	t = t.UTC()
+	if t.Nanosecond() == 0 {
+		return t.Format("2006-01-02 15:04:05")
+	}
+	return strings.TrimRight(strings.TrimRight(t.Format("2006-01-02 15:04:05.999999"), "0"), ".")
+}
+
+func parseRFC3339TimeStringForPreview(s string) (time.Time, bool) {
+	if !strings.Contains(s, "T") {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
 func formatSQLLiteralForPreview(driver string, v any) string {
 	if v == nil {
 		return "NULL"
@@ -1818,9 +1837,12 @@ func formatSQLLiteralForPreview(driver string, v any) string {
 		}
 		return "X'" + h + "'"
 	case string:
+		if parsed, ok := parseRFC3339TimeStringForPreview(t); ok {
+			return sqlStringLiteralForPreview(driver, sqlTimeLiteralStringForPreview(parsed))
+		}
 		return sqlStringLiteralForPreview(driver, t)
 	case time.Time:
-		return sqlStringLiteralForPreview(driver, t.Format("2006-01-02 15:04:05.999999"))
+		return sqlStringLiteralForPreview(driver, sqlTimeLiteralStringForPreview(t))
 	default:
 		return sqlStringLiteralForPreview(driver, fmt.Sprint(t))
 	}

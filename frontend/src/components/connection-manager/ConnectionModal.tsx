@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { api } from "../../api";
 import type { ConnectionMeta } from "../../types";
+import { showAppMessage } from "../../utils/message";
 import ConnectionForm from "./ConnectionForm";
 import TestConnectionStatus from "./TestConnectionStatus";
 import {
@@ -13,6 +14,12 @@ import {
 } from "./connectionFormTypes";
 
 type TestPhase = "idle" | "loading" | "success" | "error";
+
+const normalizeTestSuccessMessage = (message: string) => {
+  const text = message.trim().toLowerCase();
+  if (!text || text === "connection is healthy") return "连接成功，数据库响应正常";
+  return message;
+};
 
 type Props = {
   open: boolean;
@@ -82,6 +89,7 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
     if (err) {
       setTestPhase("error");
       setTestMessage(err);
+      showAppMessage({ variant: "error", title: "保存失败", message: err });
       return;
     }
     if (!groupId) return;
@@ -103,11 +111,14 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
         });
       }
       setCreatedDraftId(null);
+      showAppMessage({ variant: "success", title: "保存成功", message: "连接设置已保存" });
       onSaved();
       onClose();
     } catch (e) {
+      const message = String(e);
       setTestPhase("error");
-      setTestMessage(String(e));
+      setTestMessage(message);
+      showAppMessage({ variant: "error", title: "保存失败", message });
     } finally {
       setBusy(false);
     }
@@ -125,6 +136,7 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
     if (err) {
       setTestPhase("error");
       setTestMessage(err);
+      showAppMessage({ variant: "error", title: "测试连接失败", message: err });
       return null;
     }
     if (!groupId) return null;
@@ -139,8 +151,10 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
       setCreatedDraftId(created.id);
       return created.id;
     } catch (e) {
+      const message = String(e);
       setTestPhase("error");
-      setTestMessage(String(e));
+      setTestMessage(message);
+      showAppMessage({ variant: "error", title: "测试连接失败", message });
       return null;
     } finally {
       setBusy(false);
@@ -156,12 +170,16 @@ export default function ConnectionModal({ open, mode, groupId, connection, onClo
     }
     try {
       const msg = await api.testConnection(id);
+      const message = normalizeTestSuccessMessage(msg || "");
       setTestPhase("success");
-      setTestMessage(msg || "连接成功");
+      setTestMessage(message);
+      showAppMessage({ variant: "success", title: "测试连接成功", message });
       onSaved();
     } catch (e) {
+      const message = String(e);
       setTestPhase("error");
-      setTestMessage(String(e));
+      setTestMessage(message);
+      showAppMessage({ variant: "error", title: "测试连接失败", message });
     }
   };
 

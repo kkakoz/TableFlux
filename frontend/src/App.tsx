@@ -43,6 +43,7 @@ import type {
   WorkspaceGroup,
 } from "./types";
 import SettingsPanel from "./components/SettingsPanel";
+import AppMessageHost from "./components/AppMessageHost";
 import ConnectionManager from "./components/connection-manager/ConnectionManager";
 import DatabaseVisibilityModal from "./components/studio/DatabaseVisibilityModal";
 import { formatCellForTimezone, readDisplayTimezone } from "./components/studio/timezoneDisplay";
@@ -59,6 +60,7 @@ import {
   resolveTableSchemaRequest,
 } from "./utils/sqlDotCompletion";
 import { isExpandableLongTextColumnType } from "./utils/gridColumnTypes";
+import { showAppMessage } from "./utils/message";
 
 type ViewMode = "main" | "studio";
 type DbTreeNode = {
@@ -165,6 +167,109 @@ type GridContextMenuEntry =
   | {
       kind: "separator";
     };
+
+type CellDetailMode = "raw" | "json-format" | "json-minify" | "url-decode" | "url-encode" | "base64-decode" | "base64-encode";
+
+type CellDetailState = {
+  column: string;
+  rowLabel: string;
+  rowIndex: number;
+  colIndex: number;
+  dbType: string;
+  originalText: string;
+  draftText: string;
+  mode: CellDetailMode;
+  error: string;
+};
+
+type CellTransformResult = {
+  text: string;
+  error?: string;
+};
+
+const CELL_DETAIL_TRANSFORMS: Array<{ mode: CellDetailMode; label: string }> = [
+  { mode: "raw", label: "原文" },
+  { mode: "json-format", label: "JSON格式化" },
+  { mode: "json-minify", label: "JSON压缩" },
+  { mode: "url-decode", label: "URL解码" },
+  { mode: "url-encode", label: "URL编码" },
+  { mode: "base64-decode", label: "Base64解码" },
+  { mode: "base64-encode", label: "Base64编码" },
+];
+
+function tryFormatJson(text: string): CellTransformResult {
+  try {
+    return { text: JSON.stringify(JSON.parse(text), null, 2) };
+  } catch (e) {
+    return { text, error: `JSON 解析失败: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+function tryMinifyJson(text: string): CellTransformResult {
+  try {
+    return { text: JSON.stringify(JSON.parse(text)) };
+  } catch (e) {
+    return { text, error: `JSON 解析失败: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+function tryUrlDecode(text: string): CellTransformResult {
+  try {
+    return { text: decodeURIComponent(text) };
+  } catch (e) {
+    return { text, error: `URL 解码失败: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+function tryUrlEncode(text: string): CellTransformResult {
+  try {
+    return { text: encodeURIComponent(text) };
+  } catch (e) {
+    return { text, error: `URL 编码失败: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+function tryBase64Decode(text: string): CellTransformResult {
+  try {
+    const binary = atob(text.trim());
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return { text: new TextDecoder().decode(bytes) };
+  } catch (e) {
+    return { text, error: `Base64 解码失败: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+function tryBase64Encode(text: string): CellTransformResult {
+  try {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+    return { text: btoa(binary) };
+  } catch (e) {
+    return { text, error: `Base64 编码失败: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+function transformCellDetailText(mode: CellDetailMode, draftText: string, originalText: string): CellTransformResult {
+  switch (mode) {
+    case "raw":
+      return { text: originalText };
+    case "json-format":
+      return tryFormatJson(draftText);
+    case "json-minify":
+      return tryMinifyJson(draftText);
+    case "url-decode":
+      return tryUrlDecode(draftText);
+    case "url-encode":
+      return tryUrlEncode(draftText);
+    case "base64-decode":
+      return tryBase64Decode(draftText);
+    case "base64-encode":
+      return tryBase64Encode(draftText);
+  }
+}
 
 function clampGridContextMenuPosition(x: number, y: number) {
   const w = 340;
@@ -413,11 +518,14 @@ function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const studioGroupId = params.get("groupId") ?? "";
   const mode: ViewMode = params.get("studio") === "1" ? "studio" : "main";
+  const view = mode === "studio" ? <StudioView groupId={studioGroupId} /> : <ConnectionManager />;
 
-  if (mode === "studio") {
-    return <StudioView groupId={studioGroupId} />;
-  }
-  return <ConnectionManager />;
+  return (
+    <>
+      {view}
+      <AppMessageHost />
+    </>
+  );
 }
 
 function StudioView({ groupId }: { groupId: string }) {
@@ -428,7 +536,10 @@ function StudioView({ groupId }: { groupId: string }) {
   const [tableFilter, setTableFilter] = useState("");
   const [tabsByDatabase, setTabsByDatabase] = useState<Record<string, WorkbenchTab[]>>({});
   const [activeTabByDatabase, setActiveTabByDatabase] = useState<Record<string, string>>({});
-  const [, setError] = useState("");
+  const setError = useCallback((message: string) => {
+    if (!message) return;
+    showAppMessage({ variant: "error", title: "操作失败", message });
+  }, []);
   const [sidebarWidth, setSidebarWidth] = useState(272);
   const [editorHeight, setEditorHeight] = useState(340);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -437,6 +548,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRev, setHistoryRev] = useState(0);
   const [migrationOpen, setMigrationOpen] = useState(false);
+  const [migrationProgressOpen, setMigrationProgressOpen] = useState(false);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationMsg, setMigrationMsg] = useState("");
   const [migrationWorkerCount, setMigrationWorkerCount] = useState(2);
@@ -1681,6 +1793,8 @@ function StudioView({ groupId }: { groupId: string }) {
         batchSize: migrationBatchSize,
       })) as DataMigrationJobSnapshot;
       setMigrationJob(job);
+      setMigrationOpen(false);
+      setMigrationProgressOpen(true);
       setMigrationMsg(`迁移任务已启动，${job.workerCount} 个协程处理中`);
     } catch (e) {
       setMigrationMsg(String(e));
@@ -1897,7 +2011,7 @@ function StudioView({ groupId }: { groupId: string }) {
     monacoEditorRef.current = editor;
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyR, () => runSQLSingleAtCursorRef.current());
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyQ, () => addTabRef.current());
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL, () => openAiAssistRef.current());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => openAiAssistRef.current());
     if (!completionDisposableRef.current) {
       completionDisposableRef.current = monaco.languages.registerCompletionItemProvider("sql", {
         triggerCharacters: ["."],
@@ -2252,9 +2366,6 @@ function StudioView({ groupId }: { groupId: string }) {
                   </option>
                 ))}
               </select>
-              <span className="max-w-[200px] truncate text-[15px] text-slate-600" title={selectedDatabase || undefined}>
-                {activeConnMeta ? `${activeConnMeta.name} (${activeConnMeta.driver})` : "未选连接"}
-              </span>
               <span className="max-w-[160px] truncate text-[15px] text-slate-500" title={selectedDatabase || undefined}>
                 {selectedDatabase ? `当前库 · ${selectedDatabase}` : "未选库"}
               </span>
@@ -2268,7 +2379,7 @@ function StudioView({ groupId }: { groupId: string }) {
                 <RefreshCw className="h-4 w-4" strokeWidth={2} />
               </button>
               <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                <span className="hidden text-[11px] text-slate-400 lg:inline">Ctrl+L AI · Ctrl+R 执行当前语句</span>
+                <span className="hidden text-[11px] text-slate-400 lg:inline">Ctrl+K AI · Ctrl+R 执行当前语句</span>
                 <button type="button" className="tf-btn-toolbar" onClick={addTab}>
                   新标签
                 </button>
@@ -2842,7 +2953,12 @@ function StudioView({ groupId }: { groupId: string }) {
                         disabled={!activeTab.tableEditPreviewStatements?.length}
                         onClick={() => {
                           const text = (activeTab.tableEditPreviewStatements ?? []).join("\n\n");
-                          void navigator.clipboard.writeText(text).catch(() => setError("复制失败"));
+                          void navigator.clipboard
+                            .writeText(text)
+                            .then(() =>
+                              showAppMessage({ variant: "success", title: "复制成功", message: "SQL 已复制到剪贴板" }),
+                            )
+                            .catch(() => setError("复制失败"));
                         }}
                       >
                         复制全部
@@ -3055,7 +3171,13 @@ function StudioView({ groupId }: { groupId: string }) {
                   <h3>数据迁移</h3>
                   <p className="migration-subtitle">按表并发迁移数据，每个协程一次处理一张表。</p>
                 </div>
-                <button className="btn ghost" onClick={() => setMigrationOpen(false)} disabled={migrationBusy}>
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    setMigrationOpen(false);
+                    if (migrationJob) setMigrationProgressOpen(true);
+                  }}
+                >
                   关闭
                 </button>
               </div>
@@ -3234,6 +3356,70 @@ function StudioView({ groupId }: { groupId: string }) {
           </div>
         )}
 
+        {migrationProgressOpen && migrationJob && (
+          <div className="modal-mask">
+            <div className="modal-panel migration-panel migration-progress-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head migration-head">
+                <div>
+                  <h3>迁移进度</h3>
+                  <p className="migration-subtitle">任务已提交，当前窗口持续刷新每张表的迁移状态。</p>
+                </div>
+                <div className="migration-head-actions">
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => {
+                      setMigrationProgressOpen(false);
+                      setMigrationOpen(true);
+                    }}
+                    disabled={migrationBusy}
+                  >
+                    返回配置
+                  </button>
+                  <button className="btn ghost" type="button" onClick={() => setMigrationProgressOpen(false)}>
+                    关闭
+                  </button>
+                </div>
+              </div>
+
+              <div className="migration-progress migration-progress-standalone">
+                <div className="migration-progress-top">
+                  <strong>{migrationProgressPercent}%</strong>
+                  <span>
+                    已完成 {migrationCompletedCount}/{migrationJob.total}，成功 {migrationJob.success}，失败 {migrationJob.failed}，运行中 {migrationJob.running}
+                  </span>
+                </div>
+                <div className="migration-progress-bar">
+                  <span style={{ width: `${migrationProgressPercent}%` }} />
+                </div>
+                <div className="migration-status-table">
+                  <div className="migration-status-row head">
+                    <span>表名</span>
+                    <span>状态</span>
+                    <span>行数</span>
+                    <span>信息</span>
+                  </div>
+                  {migrationJob.tables.map((table) => (
+                    <div key={table.table} className={`migration-status-row ${table.status}`}>
+                      <span title={table.table}>{table.table}</span>
+                      <span>{migrationStatusLabel(table.status)}</span>
+                      <span>{table.migratedRows || "-"}</span>
+                      <span title={table.error || table.message}>{table.error || table.message || "-"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="migration-actions">
+                <button className="btn ghost" onClick={cancelMigration} disabled={!migrationBusy || !migrationJob?.jobId}>
+                  取消任务
+                </button>
+                {migrationMsg && <p className="migration-message">{migrationMsg}</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
@@ -3320,7 +3506,7 @@ function VirtualResultGrid({
   const [gridSelection, setGridSelection] = useState<GridSelection>(() => createEmptyGridSelection());
   const [ctxMenu, setCtxMenu] = useState<GridContextMenuState | null>(null);
   const [sortMenu, setSortMenu] = useState<{ colIndex: number; bounds: HeaderBounds } | null>(null);
-  const [cellDetail, setCellDetail] = useState<{ column: string; rowLabel: string; text: string } | null>(null);
+  const [cellDetail, setCellDetail] = useState<CellDetailState | null>(null);
   /** 列拖拽调整后的宽度；列集合变化时重置为默认 */
   const [columnWidths, setColumnWidths] = useState<number[]>([]);
   const gridHostRef = useRef<HTMLDivElement | null>(null);
@@ -3431,7 +3617,13 @@ function VirtualResultGrid({
       setCellDetail({
         column: colName,
         rowLabel: String(markerStart + r),
-        text,
+        rowIndex: r,
+        colIndex: c,
+        dbType: dbType ?? "",
+        originalText: text,
+        draftText: text,
+        mode: "raw",
+        error: "",
       });
     },
     [columns, columnTypes, pageRows, displayTimezone, markerStart],
@@ -3597,6 +3789,7 @@ function VirtualResultGrid({
   const copySelection = async () => {
     try {
       await dataEditorRef.current?.emit("copy");
+      showAppMessage({ variant: "success", title: "复制成功", message: "选中内容已复制到剪贴板" });
     } catch (e) {
       onCopyError(`复制失败: ${String(e)}`);
     }
@@ -3606,6 +3799,7 @@ function VirtualResultGrid({
     async (text: string) => {
       try {
         await navigator.clipboard.writeText(text);
+        showAppMessage({ variant: "success", title: "复制成功", message: "内容已复制到剪贴板" });
       } catch (e) {
         onCopyError(`复制失败: ${String(e)}`);
       }
@@ -3686,6 +3880,45 @@ function VirtualResultGrid({
       onCopyError(`复制 UPDATE 语句失败: ${String(e)}`);
     }
   }, [copyText, ctxMenu, onCopyError, pageRows, primaryKeyColumns, tableContext]);
+
+  const applyCellDetailTransform = useCallback((mode: CellDetailMode) => {
+    setCellDetail((current) => {
+      if (!current) return current;
+      const result = transformCellDetailText(mode, current.draftText, current.originalText);
+      return {
+        ...current,
+        mode,
+        draftText: result.error ? current.draftText : result.text,
+        error: result.error ?? "",
+      };
+    });
+  }, []);
+
+  const resetCellDetailDraft = useCallback(() => {
+    setCellDetail((current) =>
+      current
+        ? {
+            ...current,
+            draftText: current.originalText,
+            mode: "raw",
+            error: "",
+          }
+        : current,
+    );
+  }, []);
+
+  const applyCellDetailToGrid = useCallback(() => {
+    if (!cellDetail || !editable || !onCellValueChange || pkSet.has(cellDetail.column)) return;
+    const rawOld = pageRows[cellDetail.rowIndex]?.[cellDetail.column];
+    const next = coerceEditedCellValue(rawOld, cellDetail.draftText);
+    onCellValueChange(cellDetail.rowIndex, cellDetail.column, next);
+    setCellDetail(null);
+    showAppMessage({
+      variant: "success",
+      title: "已回填",
+      message: "单元格已标记为未提交修改，预览并确认后会更新数据库。",
+    });
+  }, [cellDetail, editable, onCellValueChange, pageRows, pkSet]);
 
   const contextMenuEntries = useMemo(() => {
     const ctx = ctxMenu?.context;
@@ -3810,6 +4043,18 @@ function VirtualResultGrid({
       }),
     [runMenuAction],
   );
+
+  const cellDetailCanApply = Boolean(
+    cellDetail && editable && onCellValueChange && !pkSet.has(cellDetail.column),
+  );
+  const cellDetailApplyHint =
+    !cellDetail
+      ? ""
+      : pkSet.has(cellDetail.column)
+        ? "主键列不能通过此处回填。"
+        : !editable || !onCellValueChange
+          ? "当前结果不可编辑，可继续查看、转换和复制。"
+          : "回填后会先标记为未提交修改。";
 
   return (
     <div className="result-grid-root">
@@ -3972,17 +4217,27 @@ function VirtualResultGrid({
               role="presentation"
               onClick={() => setCellDetail(null)}
             >
-              <div className="modal-panel large" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-head">
-                  <h3 className="text-sm font-medium text-slate-800">
-                    {cellDetail.column} · 行 {cellDetail.rowLabel}
-                  </h3>
+              <div className="modal-panel large cell-detail-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-head cell-detail-head">
+                  <div className="min-w-0">
+                    <h3 className="cell-detail-title">{cellDetail.column}</h3>
+                    <div className="cell-detail-meta">
+                      <span>行 {cellDetail.rowLabel}</span>
+                      <span>类型 {cellDetail.dbType || "unknown"}</span>
+                      <span>{cellDetail.draftText.length} 字符</span>
+                    </div>
+                  </div>
                   <div className="flex shrink-0 gap-2">
                     <button
                       type="button"
                       className="btn ghost text-xs"
                       onClick={() => {
-                        void navigator.clipboard.writeText(cellDetail.text).catch(() => onCopyError("复制失败"));
+                        void navigator.clipboard
+                          .writeText(cellDetail.draftText)
+                          .then(() =>
+                            showAppMessage({ variant: "success", title: "复制成功", message: "单元格内容已复制到剪贴板" }),
+                          )
+                          .catch(() => onCopyError("复制失败"));
                       }}
                     >
                       复制
@@ -3992,13 +4247,53 @@ function VirtualResultGrid({
                     </button>
                   </div>
                 </div>
+                <div className="cell-detail-toolbar" role="toolbar" aria-label="内容格式">
+                  {CELL_DETAIL_TRANSFORMS.map((item) => (
+                    <button
+                      key={item.mode}
+                      type="button"
+                      className={`cell-detail-format-btn ${cellDetail.mode === item.mode ? "active" : ""}`}
+                      onClick={() => applyCellDetailTransform(item.mode)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                {cellDetail.error ? <div className="cell-detail-error">{cellDetail.error}</div> : null}
                 <textarea
-                  readOnly
-                  className="w-full min-h-[200px] max-h-[min(60vh,480px)] resize-y rounded border border-slate-200 bg-slate-50 p-2 font-mono text-[11px] leading-relaxed text-slate-800"
-                  value={cellDetail.text}
+                  className="tf-scrollbar cell-detail-textarea"
+                  value={cellDetail.draftText}
                   aria-label="单元格完整内容"
+                  spellCheck={false}
+                  onChange={(e) =>
+                    setCellDetail((current) =>
+                      current
+                        ? {
+                            ...current,
+                            draftText: e.target.value,
+                            mode: "raw",
+                            error: "",
+                          }
+                        : current,
+                    )
+                  }
                 />
-                <p className="mt-2 text-[11px] text-slate-500">共 {cellDetail.text.length} 字符</p>
+                <div className="cell-detail-footer">
+                  <span className="cell-detail-hint">{cellDetailApplyHint}</span>
+                  <div className="cell-detail-actions">
+                    <button type="button" className="btn ghost text-xs" onClick={resetCellDetailDraft}>
+                      重置
+                    </button>
+                    <button
+                      type="button"
+                      className="btn text-xs"
+                      disabled={!cellDetailCanApply}
+                      onClick={applyCellDetailToGrid}
+                    >
+                      回填到单元格
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>,
             document.body,

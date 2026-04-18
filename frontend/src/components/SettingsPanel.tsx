@@ -4,6 +4,7 @@ import { useTheme } from "./ThemeProvider";
 import type { Settings as SettingsType, AIConfig } from "../types";
 import "./settings.css";
 import { DEFAULT_TIMEZONE, readDisplayTimezone, TIMEZONE_OPTIONS, writeDisplayTimezone } from "./studio/timezoneDisplay";
+import { showAppMessage } from "../utils/message";
 
 type SettingsCategory = "general" | "editor" | "query" | "timezone" | "ai";
 
@@ -94,10 +95,10 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
         }),
       );
 
-      alert("设置已保存");
+      showAppMessage({ variant: "success", title: "设置成功", message: "设置已保存并生效" });
     } catch (error) {
       console.error("Failed to save settings:", error);
-      alert("设置保存失败：" + error);
+      showAppMessage({ variant: "error", title: "设置失败", message: "设置保存失败：" + error });
     }
   };
 

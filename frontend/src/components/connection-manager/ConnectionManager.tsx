@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
 import type { ConnectionMeta, WorkspaceGroup } from "../../types";
+import { showAppMessage } from "../../utils/message";
 import SettingsPanel from "../SettingsPanel";
 import ConnectionModal from "./ConnectionModal";
 import ConnectionListPanel from "./ConnectionListPanel";
@@ -13,13 +14,22 @@ const randomColor = () => {
   return colors[Math.floor(Math.random() * colors.length)];
 };
 
+const normalizeTestSuccessMessage = (message: string) => {
+  const text = message.trim().toLowerCase();
+  if (!text || text === "connection is healthy") return "连接成功，数据库响应正常";
+  return message;
+};
+
 export default function ConnectionManager() {
   const [groups, setGroups] = useState<WorkspaceGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [connections, setConnections] = useState<ConnectionMeta[]>([]);
   const [groupConnCounts, setGroupConnCounts] = useState<Record<string, number>>({});
   const [groupName, setGroupName] = useState("");
-  const [message, setMessage] = useState("");
+  const setMessage = useCallback((message: string) => {
+    if (!message) return;
+    showAppMessage({ variant: "error", title: "操作失败", message });
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedConnId, setSelectedConnId] = useState<string | null>(null);
@@ -114,11 +124,12 @@ export default function ConnectionManager() {
   const handleTest = async (c: ConnectionMeta) => {
     try {
       const msg = await api.testConnection(c.id);
-      setMessage(msg || "测试成功");
+      const message = normalizeTestSuccessMessage(msg || "");
+      showAppMessage({ variant: "success", title: "测试连接成功", message });
       await loadConnections(selectedGroupId);
       await refreshGroupCounts();
     } catch (e) {
-      setMessage(String(e));
+      showAppMessage({ variant: "error", title: "测试连接失败", message: String(e) });
     }
   };
 
@@ -187,18 +198,6 @@ export default function ConnectionManager() {
           />
         </div>
 
-        {message ? (
-          <div className="pointer-events-none fixed bottom-4 left-1/2 z-[90] max-w-[min(92vw,420px)] -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 shadow-lg shadow-slate-900/10">
-            <button
-              type="button"
-              className="pointer-events-auto float-right ml-2 text-slate-400 hover:text-slate-700"
-              onClick={() => setMessage("")}
-            >
-              ×
-            </button>
-            {message}
-          </div>
-        ) : null}
       </div>
 
       {modalOpen ? (

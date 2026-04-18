@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Copy, History, Trash2, X } from "lucide-react";
 import { clearSqlHistory, type SqlHistoryItem } from "../../utils/sqlHistory";
+import { showAppMessage } from "../../utils/message";
 import {
   classifySql,
   extractSqlObjectHint,
@@ -60,6 +61,7 @@ export default function SqlHistoryModal({ open, items, onClose, onLoadToEditor, 
       try {
         await navigator.clipboard.writeText(sql);
         setCopiedId(id);
+        showAppMessage({ variant: "success", title: "复制成功", message: "SQL 已复制到剪贴板" });
         window.setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1600);
       } catch {
         onCopyError?.("复制失败");
