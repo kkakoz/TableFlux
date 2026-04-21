@@ -122,6 +122,13 @@ export type DataMigrationJobSnapshot = {
   message: string;
 };
 
+export type MigrationHistoryEntry = DataMigrationJobSnapshot & {
+  sourceConnectionName: string;
+  sourceDatabase: string;
+  targetConnectionName: string;
+  targetDatabase: string;
+};
+
 export type AIConfig = {
   apiKey: string;
   apiUrl: string;

@@ -1917,6 +1917,158 @@ th {
   white-space: pre-wrap;
 }
 
+/* 宽列表格（含时间列） */
+.migration-status-row-wide {
+  grid-template-columns: minmax(130px, 1.2fr) 76px 70px 120px 120px minmax(140px, 1fr);
+}
+
+/* 迁移时间信息行 */
+.migration-time-info {
+  display: flex;
+  gap: 20px;
+  padding: 4px 9px 6px;
+  font-size: 12px;
+  color: var(--sub);
+}
+
+/* 迁移历史面板 */
+.migration-history-panel {
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.migration-history-empty {
+  padding: 32px 0;
+  text-align: center;
+}
+
+.migration-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.migration-history-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.migration-history-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.migration-history-route {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.migration-history-conn {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.migration-history-arrow {
+  color: var(--sub);
+  font-size: 14px;
+  margin: 0 2px;
+}
+
+.migration-history-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.migration-history-count {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.migration-history-count.success {
+  color: #15803d;
+}
+
+.migration-history-count.failed {
+  color: #b91c1c;
+}
+
+.migration-history-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.migration-history-times {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--sub);
+}
+
+.migration-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.migration-badge-success {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.migration-badge-failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.migration-badge-canceled {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.migration-badge-running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.migration-history-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.migration-history-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 0;
+  flex-wrap: wrap;
+}
+
+.migration-history-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sub);
+}
+
 @media (max-width: 1100px) {
   .studio-layout {
     display: block;

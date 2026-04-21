@@ -39,6 +39,7 @@ import type {
   ConnectionMeta,
   DataMigrationJobSnapshot,
   ExecuteSQLResult,
+  MigrationHistoryEntry,
   TableSchema,
   WorkspaceGroup,
 } from "./types";
@@ -572,6 +573,15 @@ function StudioView({ groupId }: { groupId: string }) {
   const [migrationBatchSize, setMigrationBatchSize] = useState(500);
   const [migrationTableFilter, setMigrationTableFilter] = useState("");
   const [migrationJob, setMigrationJob] = useState<DataMigrationJobSnapshot | null>(null);
+  const [migrationHistory, setMigrationHistory] = useState<MigrationHistoryEntry[]>([]);
+  const [migrationHistoryOpen, setMigrationHistoryOpen] = useState(false);
+  const [migrationHistoryDetail, setMigrationHistoryDetail] = useState<MigrationHistoryEntry | null>(null);
+  const migrationJobMetaRef = useRef<{
+    sourceConnectionName: string;
+    sourceDatabase: string;
+    targetConnectionName: string;
+    targetDatabase: string;
+  } | null>(null);
   const [allGroups, setAllGroups] = useState<WorkspaceGroup[]>([]);
   const [sourceGroupId, setSourceGroupId] = useState("");
   const [sourceConnectionId, setSourceConnectionId] = useState("");
@@ -1915,9 +1925,31 @@ function StudioView({ groupId }: { groupId: string }) {
     setHistoryOpen(false);
   };
 
+  const openMigrationPanel = () => {
+    setSourceGroupId("");
+    setSourceConnectionId("");
+    setSourceDatabase("");
+    setSourceDatabases([]);
+    setSourceTables([]);
+    setSelectedSourceTables([]);
+    setTargetGroupId("");
+    setTargetConnectionId("");
+    setTargetDatabase("");
+    setTargetDatabases([]);
+    setTargetTables([]);
+    setMigrationTableFilter("");
+    setMigrationMsg("");
+    setMigrationJob(null);
+    setMigrationOpen(true);
+  };
+
   const runMigration = async () => {
     if (!sourceConnectionId || !targetConnectionId || !sourceDatabase || !targetDatabase) {
       setMigrationMsg("请完整选择源连接、目标连接、源数据库和目标数据库");
+      return;
+    }
+    if (sourceConnectionId === targetConnectionId && sourceDatabase === targetDatabase) {
+      setMigrationMsg("源数据库和目标数据库不能相同，请选择不同的连接或数据库");
       return;
     }
     if (selectedSourceTables.length === 0) {
@@ -1967,10 +1999,22 @@ function StudioView({ groupId }: { groupId: string }) {
       setMigrationMsg("请完整选择源连接、目标连接、源数据库和目标数据库");
       return;
     }
+    if (sourceConnectionId === targetConnectionId && sourceDatabase === targetDatabase) {
+      setMigrationMsg("源数据库和目标数据库不能相同，请选择不同的连接或数据库");
+      return;
+    }
     if (selectedSourceTables.length === 0) {
       setMigrationMsg("请至少选择一个要迁移的源表");
       return;
     }
+    const srcConn = sourceGroupConnections.find((c) => c.id === sourceConnectionId);
+    const tgtConn = targetGroupConnections.find((c) => c.id === targetConnectionId);
+    migrationJobMetaRef.current = {
+      sourceConnectionName: srcConn?.name ?? sourceConnectionId,
+      sourceDatabase,
+      targetConnectionName: tgtConn?.name ?? targetConnectionId,
+      targetDatabase,
+    };
     setMigrationBusy(true);
     setMigrationMsg("");
     setMigrationJob(null);
@@ -2032,6 +2076,17 @@ function StudioView({ groupId }: { groupId: string }) {
               ? `迁移完成：${done}/${job.total}，成功 ${job.success}，失败 ${job.failed}`
               : `迁移完成：成功 ${job.success}/${job.total}`,
           );
+          const meta = migrationJobMetaRef.current;
+          if (meta) {
+            const entry: MigrationHistoryEntry = {
+              ...job,
+              sourceConnectionName: meta.sourceConnectionName,
+              sourceDatabase: meta.sourceDatabase,
+              targetConnectionName: meta.targetConnectionName,
+              targetDatabase: meta.targetDatabase,
+            };
+            setMigrationHistory((prev) => [entry, ...prev]);
+          }
         }
       } catch (e) {
         if (stopped) return;
@@ -2442,7 +2497,7 @@ function StudioView({ groupId }: { groupId: string }) {
                     type="button"
                     className="block w-full px-3 py-2 text-left hover:bg-slate-50"
                     onClick={() => {
-                      setMigrationOpen(true);
+                      openMigrationPanel();
                       setMenuOpen(false);
                     }}
                   >
@@ -3521,41 +3576,15 @@ function StudioView({ groupId }: { groupId: string }) {
                 <button className="btn" onClick={runMigrationBatch} disabled={migrationBusy || selectedSourceTables.length === 0}>
                   {migrationBusy ? "迁移中..." : "开始迁移"}
                 </button>
-                <button className="btn ghost" onClick={cancelMigration} disabled={!migrationBusy || !migrationJob?.jobId}>
-                  取消任务
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => setMigrationHistoryOpen(true)}
+                >
+                  查看迁移历史
                 </button>
                 <span className="sub">默认同名迁移到目标库，当前选择 {selectedSourceTables.length} 张表。</span>
               </div>
-
-              {migrationJob && (
-                <div className="migration-progress">
-                  <div className="migration-progress-top">
-                    <strong>{migrationProgressPercent}%</strong>
-                    <span>
-                      已完成 {migrationCompletedCount}/{migrationJob.total}，成功 {migrationJob.success}，失败 {migrationJob.failed}，运行中 {migrationJob.running}
-                    </span>
-                  </div>
-                  <div className="migration-progress-bar">
-                    <span style={{ width: `${migrationProgressPercent}%` }} />
-                  </div>
-                  <div className="migration-status-table">
-                    <div className="migration-status-row head">
-                      <span>表名</span>
-                      <span>状态</span>
-                      <span>行数</span>
-                      <span>信息</span>
-                    </div>
-                    {migrationJob.tables.map((table) => (
-                      <div key={table.table} className={`migration-status-row ${table.status}`}>
-                        <span title={table.table}>{table.table}</span>
-                        <span>{migrationStatusLabel(table.status)}</span>
-                        <span>{table.migratedRows || "-"}</span>
-                        <span title={table.error || table.message}>{table.error || table.message || "-"}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               {migrationMsg && <p className="migration-message">{migrationMsg}</p>}
             </div>
           </div>
@@ -3594,21 +3623,31 @@ function StudioView({ groupId }: { groupId: string }) {
                     已完成 {migrationCompletedCount}/{migrationJob.total}，成功 {migrationJob.success}，失败 {migrationJob.failed}，运行中 {migrationJob.running}
                   </span>
                 </div>
+                {(migrationJob.startedAt || migrationJob.endedAt) && (
+                  <div className="migration-time-info">
+                    {migrationJob.startedAt && <span>开始：{formatMigrationTime(migrationJob.startedAt)}</span>}
+                    {migrationJob.endedAt && <span>结束：{formatMigrationTime(migrationJob.endedAt)}</span>}
+                  </div>
+                )}
                 <div className="migration-progress-bar">
                   <span style={{ width: `${migrationProgressPercent}%` }} />
                 </div>
-                <div className="migration-status-table">
-                  <div className="migration-status-row head">
+                <div className="migration-status-table migration-status-table-wide">
+                  <div className="migration-status-row head migration-status-row-wide">
                     <span>表名</span>
                     <span>状态</span>
                     <span>行数</span>
+                    <span>开始时间</span>
+                    <span>结束时间</span>
                     <span>信息</span>
                   </div>
                   {migrationJob.tables.map((table) => (
-                    <div key={table.table} className={`migration-status-row ${table.status}`}>
+                    <div key={table.table} className={`migration-status-row migration-status-row-wide ${table.status}`}>
                       <span title={table.table}>{table.table}</span>
                       <span>{migrationStatusLabel(table.status)}</span>
                       <span>{table.migratedRows || "-"}</span>
+                      <span>{table.startedAt ? formatMigrationTime(table.startedAt) : "-"}</span>
+                      <span>{table.endedAt ? formatMigrationTime(table.endedAt) : "-"}</span>
                       <span title={table.error || table.message}>{table.error || table.message || "-"}</span>
                     </div>
                   ))}
@@ -3621,6 +3660,108 @@ function StudioView({ groupId }: { groupId: string }) {
                 </button>
                 {migrationMsg && <p className="migration-message">{migrationMsg}</p>}
               </div>
+            </div>
+          </div>
+        )}
+
+        {migrationHistoryOpen && (
+          <div className="modal-mask">
+            <div className="modal-panel migration-panel migration-history-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head migration-head">
+                <div>
+                  <h3>迁移历史</h3>
+                  <p className="migration-subtitle">当前会话内已完成的迁移任务记录。</p>
+                </div>
+                <button className="btn ghost" type="button" onClick={() => { setMigrationHistoryOpen(false); setMigrationHistoryDetail(null); }}>
+                  关闭
+                </button>
+              </div>
+
+              {migrationHistoryDetail ? (
+                <div className="migration-history-detail">
+                  <div className="migration-history-detail-head">
+                    <button className="btn ghost" type="button" onClick={() => setMigrationHistoryDetail(null)}>← 返回列表</button>
+                    <div className="migration-history-meta">
+                      <span>{migrationHistoryDetail.sourceConnectionName} / {migrationHistoryDetail.sourceDatabase}</span>
+                      <span className="migration-history-arrow">→</span>
+                      <span>{migrationHistoryDetail.targetConnectionName} / {migrationHistoryDetail.targetDatabase}</span>
+                    </div>
+                  </div>
+                  <div className="migration-progress">
+                    <div className="migration-progress-top">
+                      <strong className={`migration-badge migration-badge-${migrationHistoryDetail.status}`}>
+                        {migrationStatusLabel(migrationHistoryDetail.status)}
+                      </strong>
+                      <span>
+                        共 {migrationHistoryDetail.total} 张表，成功 {migrationHistoryDetail.success}，失败 {migrationHistoryDetail.failed}
+                      </span>
+                    </div>
+                    <div className="migration-time-info">
+                      {migrationHistoryDetail.startedAt && <span>开始：{formatMigrationTime(migrationHistoryDetail.startedAt)}</span>}
+                      {migrationHistoryDetail.endedAt && <span>结束：{formatMigrationTime(migrationHistoryDetail.endedAt)}</span>}
+                    </div>
+                    <div className="migration-status-table migration-status-table-wide">
+                      <div className="migration-status-row head migration-status-row-wide">
+                        <span>表名</span>
+                        <span>状态</span>
+                        <span>行数</span>
+                        <span>开始时间</span>
+                        <span>结束时间</span>
+                        <span>信息</span>
+                      </div>
+                      {migrationHistoryDetail.tables.map((table) => (
+                        <div key={table.table} className={`migration-status-row migration-status-row-wide ${table.status}`}>
+                          <span title={table.table}>{table.table}</span>
+                          <span>{migrationStatusLabel(table.status)}</span>
+                          <span>{table.migratedRows || "-"}</span>
+                          <span>{table.startedAt ? formatMigrationTime(table.startedAt) : "-"}</span>
+                          <span>{table.endedAt ? formatMigrationTime(table.endedAt) : "-"}</span>
+                          <span title={table.error || table.message}>{table.error || table.message || "-"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : migrationHistory.length === 0 ? (
+                <div className="migration-history-empty">
+                  <p className="sub">暂无迁移历史记录，完成迁移后将在此展示。</p>
+                </div>
+              ) : (
+                <div className="migration-history-list">
+                  {migrationHistory.map((entry, idx) => (
+                    <div key={`${entry.jobId}-${idx}`} className="migration-history-item">
+                      <div className="migration-history-item-main">
+                        <div className="migration-history-route">
+                          <span className="migration-history-conn">{entry.sourceConnectionName}</span>
+                          <span className="sub">/</span>
+                          <span>{entry.sourceDatabase}</span>
+                          <span className="migration-history-arrow">→</span>
+                          <span className="migration-history-conn">{entry.targetConnectionName}</span>
+                          <span className="sub">/</span>
+                          <span>{entry.targetDatabase}</span>
+                        </div>
+                        <div className="migration-history-stats">
+                          <span className={`migration-badge migration-badge-${entry.status}`}>
+                            {migrationStatusLabel(entry.status)}
+                          </span>
+                          <span className="sub">{entry.total} 张表</span>
+                          <span className="migration-history-count success">{entry.success} 成功</span>
+                          {entry.failed > 0 && <span className="migration-history-count failed">{entry.failed} 失败</span>}
+                        </div>
+                      </div>
+                      <div className="migration-history-item-footer">
+                        <div className="migration-history-times">
+                          {entry.startedAt && <span>开始 {formatMigrationTime(entry.startedAt)}</span>}
+                          {entry.endedAt && <span>结束 {formatMigrationTime(entry.endedAt)}</span>}
+                        </div>
+                        <button className="btn ghost" type="button" onClick={() => setMigrationHistoryDetail(entry)}>
+                          查看详情
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -3935,6 +4076,17 @@ function migrationStatusLabel(status: string): string {
       return "已取消";
     default:
       return status || "-";
+  }
+}
+
+function formatMigrationTime(iso: string | null | undefined): string {
+  if (!iso) return "-";
+  try {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  } catch {
+    return iso;
   }
 }
 
