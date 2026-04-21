@@ -129,6 +129,7 @@ type ExplainSQLRequest struct {
 	Database     string `json:"database"`
 	SQL          string `json:"sql"`
 	RequestID    string `json:"requestId"`
+	TimeoutMs    int    `json:"timeoutMs"`
 }
 
 type CancelRunningQueryRequest struct {

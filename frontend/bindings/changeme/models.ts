@@ -684,6 +684,7 @@ export class ExplainSQLRequest {
     "database": string;
     "sql": string;
     "requestId": string;
+    "timeoutMs": number;
 
     /** Creates a new ExplainSQLRequest instance. */
     constructor($$source: Partial<ExplainSQLRequest> = {}) {
@@ -698,6 +699,9 @@ export class ExplainSQLRequest {
         }
         if (!("requestId" in $$source)) {
             this["requestId"] = "";
+        }
+        if (!("timeoutMs" in $$source)) {
+            this["timeoutMs"] = 0;
         }
 
         Object.assign(this, $$source);

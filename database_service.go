@@ -183,7 +183,8 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 		req.RowLimit = s.defaultRLS
 	}
 	// RowLimit < 0 表示不限制行数
-	if req.TimeoutMs <= 0 {
+	// TimeoutMs == 0 表示不限制超时；TimeoutMs < 0 使用默认 30s
+	if req.TimeoutMs < 0 {
 		req.TimeoutMs = 30000
 	}
 	if req.Mode == "" {
@@ -220,7 +221,13 @@ func (s *DatabaseService) ExecuteSQL(req ExecuteSQLRequest) (SQLExecutionResult,
 		return SQLExecutionResult{}, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(req.TimeoutMs)*time.Millisecond)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if req.TimeoutMs > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(req.TimeoutMs)*time.Millisecond)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 	s.registerRunning(req.RequestID, cancel)
 	defer s.unregisterRunning(req.RequestID)
 
@@ -484,7 +491,7 @@ func (s *DatabaseService) ExplainSQL(req ExplainSQLRequest) (SQLExecutionResult,
 		Database:     req.Database,
 		SQL:          "EXPLAIN " + strings.TrimSpace(req.SQL),
 		RowLimit:     500,
-		TimeoutMs:    30000,
+		TimeoutMs:    req.TimeoutMs,
 		Mode:         "single",
 		RequestID:    req.RequestID,
 	}

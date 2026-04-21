@@ -366,6 +366,8 @@ export default function SettingsPanel({ onClose }: { onClose?: () => void }) {
                     <option value="10000">10 秒</option>
                     <option value="30000">30 秒</option>
                     <option value="60000">60 秒</option>
+                    <option value="300000">5 分钟</option>
+                    <option value="0">无限制</option>
                   </select>
                 </div>
                 <div className="settings-field settings-field-inline">

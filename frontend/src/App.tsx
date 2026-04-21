@@ -424,6 +424,23 @@ async function resolveQueryLimit(): Promise<number> {
   return Math.max(100, s.queryLimit || 5000);
 }
 
+/** 读取查询超时设置（毫秒）；0 表示无超时限制 */
+async function resolveQueryTimeout(): Promise<number> {
+  try {
+    const raw = localStorage.getItem("settings");
+    if (raw) {
+      const parsed = JSON.parse(raw) as { queryTimeout?: number };
+      if (typeof parsed.queryTimeout === "number" && parsed.queryTimeout >= 0) {
+        return parsed.queryTimeout;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const s = await api.getSettings();
+  return s.queryTimeout ?? 30000;
+}
+
 const SQL_KEYWORDS = [
   "SELECT",
   "FROM",
@@ -588,6 +605,36 @@ function StudioView({ groupId }: { groupId: string }) {
   const [dbVisibilityOpen, setDbVisibilityOpen] = useState(false);
   /** null：尚未从本地恢复，对象树暂显示全部库 */
   const [visibleDbSet, setVisibleDbSet] = useState<Set<string> | null>(null);
+  /** 对象树表行右键菜单 */
+  const [tableCtxMenu, setTableCtxMenu] = useState<{
+    x: number;
+    y: number;
+    dbName: string;
+    tableName: string;
+  } | null>(null);
+  /** 正在执行后台操作的表（key = dbName::tableName） */
+  const [tableOpsRunning, setTableOpsRunning] = useState<Set<string>>(new Set());
+  /** 查看表结构弹窗 */
+  const [tableSchemaModal, setTableSchemaModal] = useState<{
+    dbName: string;
+    tableName: string;
+    schema: TableSchema | null;
+    loading: boolean;
+  } | null>(null);
+  /** 危险操作确认弹窗 */
+  const [tableConfirmModal, setTableConfirmModal] = useState<{
+    type: "drop" | "truncate";
+    dbName: string;
+    tableName: string;
+  } | null>(null);
+  /** 复制表弹窗 */
+  const [tableCopyModal, setTableCopyModal] = useState<{
+    dbName: string;
+    tableName: string;
+    newName: string;
+    running: boolean;
+    error: string;
+  } | null>(null);
   const [displayTimezone, setDisplayTimezone] = useState(() => readDisplayTimezone());
 
   const completionWordsRef = useRef<string[]>([...SQL_KEYWORDS]);
@@ -1483,6 +1530,154 @@ function StudioView({ groupId }: { groupId: string }) {
     setActiveForDatabase(dbName, tableTabId);
   };
 
+  // ── 对象树表行右键操作 ────────────────────────────────────────────────────
+
+  const tableOpKey = (dbName: string, tableName: string) => `${dbName}::${tableName}`;
+
+  const isTableOpRunning = (dbName: string, tableName: string) =>
+    tableOpsRunning.has(tableOpKey(dbName, tableName));
+
+  const startTableOp = (dbName: string, tableName: string) =>
+    setTableOpsRunning((prev) => new Set([...prev, tableOpKey(dbName, tableName)]));
+
+  const endTableOp = (dbName: string, tableName: string) =>
+    setTableOpsRunning((prev) => {
+      const next = new Set(prev);
+      next.delete(tableOpKey(dbName, tableName));
+      return next;
+    });
+
+  const computeCopyName = (tableName: string, existingTables: string[]) => {
+    const base = `${tableName}_copy`;
+    if (!existingTables.includes(base)) return base;
+    let n = 2;
+    while (existingTables.includes(`${base}${n}`)) n++;
+    return `${base}${n}`;
+  };
+
+  const openTableCtxMenu = (e: React.MouseEvent, dbName: string, tableName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const margin = 8;
+    const menuW = 160;
+    const menuH = 130;
+    const nx = Math.min(e.clientX, window.innerWidth - menuW - margin);
+    const ny = Math.min(e.clientY, window.innerHeight - menuH - margin);
+    setTableCtxMenu({ x: Math.max(margin, nx), y: Math.max(margin, ny), dbName, tableName });
+  };
+
+  useEffect(() => {
+    if (!tableCtxMenu) return;
+    const close = () => setTableCtxMenu(null);
+    const t = window.setTimeout(() => {
+      document.addEventListener("click", close);
+      document.addEventListener("contextmenu", close);
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener("click", close);
+      document.removeEventListener("contextmenu", close);
+    };
+  }, [tableCtxMenu]);
+
+  const handleViewTableSchema = async (dbName: string, tableName: string) => {
+    if (!activeConnectionId) return;
+    setTableSchemaModal({ dbName, tableName, schema: null, loading: true });
+    try {
+      const schema = await getOrFetchTableSchema(activeConnectionId, dbName, tableName, sqlDialect);
+      setTableSchemaModal((prev) => (prev ? { ...prev, schema, loading: false } : null));
+    } catch (e) {
+      setTableSchemaModal((prev) => (prev ? { ...prev, loading: false } : null));
+      showAppMessage({ variant: "error", title: "获取表结构失败", message: String(e) });
+    }
+  };
+
+  const execTableSql = async (dbName: string, tableName: string, sql: string, timeoutMs = 60000) => {
+    if (!activeConnectionId) return;
+    startTableOp(dbName, tableName);
+    try {
+      await api.executeSQL({
+        connectionId: activeConnectionId,
+        database: dbName,
+        sql,
+        mode: "single",
+        rowLimit: -1,
+        pageOffset: 0,
+        pageLimit: 100,
+        timeoutMs,
+        requestId: createRequestId(),
+      });
+    } finally {
+      endTableOp(dbName, tableName);
+    }
+  };
+
+  const handleDropTable = async () => {
+    const m = tableConfirmModal;
+    if (!m) return;
+    setTableConfirmModal(null);
+    const { dbName, tableName } = m;
+    const tableRef = quoteSqlIdentifier(tableName, sqlDialect);
+    try {
+      await execTableSql(dbName, tableName, `DROP TABLE ${tableRef};`);
+      void loadTablesForDB(dbName);
+      showAppMessage({ variant: "success", title: "删除成功", message: `表 ${tableName} 已删除` });
+    } catch (e) {
+      showAppMessage({ variant: "error", title: "删除失败", message: String(e) });
+    }
+  };
+
+  const handleTruncateTable = async () => {
+    const m = tableConfirmModal;
+    if (!m) return;
+    setTableConfirmModal(null);
+    const { dbName, tableName } = m;
+    const tableRef = quoteSqlIdentifier(tableName, sqlDialect);
+    try {
+      await execTableSql(dbName, tableName, `TRUNCATE TABLE ${tableRef};`);
+      showAppMessage({ variant: "success", title: "清空成功", message: `表 ${tableName} 已清空` });
+    } catch (e) {
+      showAppMessage({ variant: "error", title: "清空失败", message: String(e) });
+    }
+  };
+
+  const handleCopyTable = async () => {
+    if (!tableCopyModal || !activeConnectionId) return;
+    const { dbName, tableName, newName } = tableCopyModal;
+    const trimmedName = newName.trim();
+    if (!trimmedName) return;
+    setTableCopyModal((prev) => (prev ? { ...prev, running: true, error: "" } : null));
+    const srcRef = quoteSqlIdentifier(tableName, sqlDialect);
+    const dstRef = quoteSqlIdentifier(trimmedName, sqlDialect);
+    const copySql =
+      sqlDialect === "postgres"
+        ? `CREATE TABLE ${dstRef} AS SELECT * FROM ${srcRef};`
+        : `CREATE TABLE ${dstRef} SELECT * FROM ${srcRef};`;
+    startTableOp(dbName, tableName);
+    try {
+      await api.executeSQL({
+        connectionId: activeConnectionId,
+        database: dbName,
+        sql: copySql,
+        mode: "single",
+        rowLimit: -1,
+        pageOffset: 0,
+        pageLimit: 100,
+        timeoutMs: 120000,
+        requestId: createRequestId(),
+      });
+      setTableCopyModal(null);
+      void loadTablesForDB(dbName);
+      showAppMessage({ variant: "success", title: "复制成功", message: `表 ${tableName} 已复制为 ${trimmedName}` });
+    } catch (e) {
+      setTableCopyModal((prev) => (prev ? { ...prev, running: false, error: String(e) } : null));
+    } finally {
+      endTableOp(dbName, tableName);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   const loadSqlResultPage = async (tabId: string, requestId: string, page: number, limit: number) => {
     if (!activeConnectionId) return;
     const connectionId = activeConnectionId;
@@ -1548,7 +1743,7 @@ function StudioView({ groupId }: { groupId: string }) {
     const requestId = createRequestId();
     beginSqlTabRequest(connectionId, dbName, tabId, requestId, trimmed);
     try {
-      const pageLimit = await resolveQueryLimit();
+      const [pageLimit, timeoutMs] = await Promise.all([resolveQueryLimit(), resolveQueryTimeout()]);
       const r = await api.executeSQL({
         connectionId,
         database: dbName,
@@ -1557,7 +1752,7 @@ function StudioView({ groupId }: { groupId: string }) {
         rowLimit: -1,
         pageOffset: 0,
         pageLimit,
-        timeoutMs: 30000,
+        timeoutMs,
         requestId,
       });
       pushSqlHistory(trimmed);
@@ -1878,7 +2073,8 @@ function StudioView({ groupId }: { groupId: string }) {
     beginSqlTabRequest(connectionId, dbName, tabId, requestId, trimmed);
     try {
       const explainSql = `EXPLAIN ${trimmed}`;
-      const r = await api.explainSQL({ connectionId, database: dbName, sql: trimmed, requestId });
+      const timeoutMs = await resolveQueryTimeout();
+      const r = await api.explainSQL({ connectionId, database: dbName, sql: trimmed, requestId, timeoutMs });
       finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
         ...tab,
         result: r,
@@ -2300,18 +2496,27 @@ function StudioView({ groupId }: { groupId: string }) {
                             {filterQ && db.loaded && db.tables.length > 0 ? "无匹配" : "暂无表"}
                           </div>
                         )}
-                        {db.visibleTables.map((tableName) => (
-                          <button
-                            key={`${db.name}.${tableName}`}
-                            type="button"
-                            title={`${tableName} · 双击打开`}
-                            className="mb-px flex w-full min-w-0 items-center gap-1 rounded-sm py-px pl-0.5 pr-1 text-left font-mono text-[12px] font-normal text-slate-700 hover:bg-slate-50"
-                            onDoubleClick={() => appendSelectSQL(db.name, tableName)}
-                          >
-                            <Table2 className="h-2.5 w-2.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
-                            <span className="min-w-0 flex-1 truncate">{tableName}</span>
-                          </button>
-                        ))}
+                        {db.visibleTables.map((tableName) => {
+                          const opRunning = isTableOpRunning(db.name, tableName);
+                          return (
+                            <button
+                              key={`${db.name}.${tableName}`}
+                              type="button"
+                              title={opRunning ? `${tableName} · 正在执行…` : `${tableName} · 双击打开 / 右键操作`}
+                              className={`mb-px flex w-full min-w-0 items-center gap-1 rounded-sm py-px pl-0.5 pr-1 text-left font-mono text-[12px] font-normal text-slate-700 hover:bg-slate-50 ${opRunning ? "opacity-60" : ""}`}
+                              onDoubleClick={() => !opRunning && appendSelectSQL(db.name, tableName)}
+                              onContextMenu={(e) => !opRunning && openTableCtxMenu(e, db.name, tableName)}
+                            >
+                              {opRunning ? (
+                                <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin text-blue-400" strokeWidth={2} aria-hidden />
+                              ) : (
+                                <Table2 className="h-2.5 w-2.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
+                              )}
+                              <span className="min-w-0 flex-1 truncate">{tableName}</span>
+                              {opRunning && <span className="shrink-0 text-[10px] text-blue-400">执行中</span>}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2366,7 +2571,7 @@ function StudioView({ groupId }: { groupId: string }) {
                   </option>
                 ))}
               </select>
-              <span className="max-w-[160px] truncate text-[15px] text-slate-500" title={selectedDatabase || undefined}>
+              <span className="truncate text-[15px] text-slate-500" title={selectedDatabase || undefined}>
                 {selectedDatabase ? `当前库 · ${selectedDatabase}` : "未选库"}
               </span>
               <button
@@ -3421,6 +3626,295 @@ function StudioView({ groupId }: { groupId: string }) {
         )}
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+
+      {/* 对象树表行右键菜单 */}
+      {tableCtxMenu &&
+        createPortal(
+          (() => {
+            const { x, y, dbName, tableName } = tableCtxMenu;
+            const close = () => setTableCtxMenu(null);
+            return (
+              <div
+                className="fixed z-[9999] min-w-[160px] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-[12px] shadow-lg shadow-slate-900/15"
+                style={{ left: x, top: y }}
+                role="menu"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    close();
+                    void handleViewTableSchema(dbName, tableName);
+                  }}
+                >
+                  <SquareCode className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} />
+                  查看表结构
+                </button>
+                <div className="my-1 h-px bg-slate-100" role="separator" />
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    close();
+                    const existing = dbTree.find((d) => d.name === dbName)?.tables ?? [];
+                    const newName = computeCopyName(tableName, existing);
+                    setTableCopyModal({ dbName, tableName, newName, running: false, error: "" });
+                  }}
+                >
+                  <Table2 className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} />
+                  复制表
+                </button>
+                <div className="my-1 h-px bg-slate-100" role="separator" />
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-amber-600 hover:bg-amber-50"
+                  onClick={() => {
+                    close();
+                    setTableConfirmModal({ type: "truncate", dbName, tableName });
+                  }}
+                >
+                  <XCircle className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                  清空表
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-red-600 hover:bg-red-50"
+                  onClick={() => {
+                    close();
+                    setTableConfirmModal({ type: "drop", dbName, tableName });
+                  }}
+                >
+                  <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                  删除表
+                </button>
+              </div>
+            );
+          })(),
+          document.body,
+        )}
+
+      {/* 查看表结构弹窗 */}
+      {tableSchemaModal &&
+        createPortal(
+          <div
+            className="modal-mask"
+            style={{ zIndex: 10010 }}
+            role="presentation"
+            onClick={() => !tableSchemaModal.loading && setTableSchemaModal(null)}
+          >
+            <div
+              className="modal-panel max-w-[min(96vw,680px)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-head">
+                <span className="font-mono font-semibold text-slate-800">{tableSchemaModal.tableName}</span>
+                <span className="ml-1.5 text-slate-400">· 表结构</span>
+                <button
+                  type="button"
+                  className="tf-btn-icon ml-auto"
+                  onClick={() => setTableSchemaModal(null)}
+                  aria-label="关闭"
+                >
+                  <X className="h-4 w-4" strokeWidth={2} />
+                </button>
+              </div>
+              <div className="modal-body min-h-[120px]">
+                {tableSchemaModal.loading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                    <span className="text-[13px]">加载中…</span>
+                  </div>
+                ) : tableSchemaModal.schema ? (
+                  <div className="overflow-auto">
+                    {tableSchemaModal.schema.engine || tableSchemaModal.schema.charset ? (
+                      <div className="mb-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                        {tableSchemaModal.schema.engine && <span>引擎: {tableSchemaModal.schema.engine}</span>}
+                        {tableSchemaModal.schema.charset && <span>字符集: {tableSchemaModal.schema.charset}</span>}
+                        {tableSchemaModal.schema.collation && <span>排序规则: {tableSchemaModal.schema.collation}</span>}
+                        {tableSchemaModal.schema.comment && <span>注释: {tableSchemaModal.schema.comment}</span>}
+                      </div>
+                    ) : null}
+                    <table className="w-full border-collapse font-mono text-[12px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-left text-[11px] text-slate-500">
+                          <th className="py-1 pr-3 font-medium">列名</th>
+                          <th className="py-1 pr-3 font-medium">类型</th>
+                          <th className="py-1 pr-3 font-medium">可空</th>
+                          <th className="py-1 pr-3 font-medium">默认值</th>
+                          <th className="py-1 pr-3 font-medium">键</th>
+                          <th className="py-1 font-medium">注释</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tableSchemaModal.schema.columns.map((col) => (
+                          <tr key={col.name} className="border-b border-slate-100 text-slate-700 hover:bg-slate-50/60">
+                            <td className="py-0.5 pr-3">
+                              <span className={col.primaryKey ? "font-semibold text-blue-700" : ""}>{col.name}</span>
+                            </td>
+                            <td className="py-0.5 pr-3 text-slate-500">{col.type}</td>
+                            <td className="py-0.5 pr-3 text-slate-400">{col.nullable ? "YES" : "NO"}</td>
+                            <td className="py-0.5 pr-3 text-slate-400">{col.defaultValue || <span className="text-slate-300">—</span>}</td>
+                            <td className="py-0.5 pr-3">
+                              {col.primaryKey && <span className="rounded bg-blue-50 px-1 py-px text-[10px] text-blue-600">PK</span>}
+                              {col.unique && !col.primaryKey && <span className="rounded bg-purple-50 px-1 py-px text-[10px] text-purple-600">UNI</span>}
+                              {col.autoIncrement && <span className="ml-0.5 rounded bg-green-50 px-1 py-px text-[10px] text-green-600">AI</span>}
+                            </td>
+                            <td className="py-0.5 text-slate-400">{col.comment || <span className="text-slate-300">—</span>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-[13px] text-slate-400">暂无结构数据</div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* 危险操作确认弹窗 */}
+      {tableConfirmModal &&
+        createPortal(
+          <div
+            className="modal-mask"
+            style={{ zIndex: 10010 }}
+            role="presentation"
+            onClick={() => setTableConfirmModal(null)}
+          >
+            <div
+              className="modal-panel max-w-[min(96vw,400px)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-head">
+                <span className="font-semibold text-slate-800">
+                  {tableConfirmModal.type === "drop" ? "删除表" : "清空表"}
+                </span>
+                <button
+                  type="button"
+                  className="tf-btn-icon ml-auto"
+                  onClick={() => setTableConfirmModal(null)}
+                  aria-label="关闭"
+                >
+                  <X className="h-4 w-4" strokeWidth={2} />
+                </button>
+              </div>
+              <div className="modal-body text-[13px] text-slate-700">
+                {tableConfirmModal.type === "drop" ? (
+                  <>
+                    确定要 <strong className="text-red-600">删除表</strong>{" "}
+                    <code className="rounded bg-slate-100 px-1 font-mono">{tableConfirmModal.tableName}</code> 吗？
+                    <div className="mt-1.5 text-[12px] text-slate-400">此操作不可撤销，表结构和数据将永久丢失。</div>
+                  </>
+                ) : (
+                  <>
+                    确定要 <strong className="text-amber-600">清空表</strong>{" "}
+                    <code className="rounded bg-slate-100 px-1 font-mono">{tableConfirmModal.tableName}</code> 吗？
+                    <div className="mt-1.5 text-[12px] text-slate-400">此操作将删除表内所有数据，但保留表结构。</div>
+                  </>
+                )}
+              </div>
+              <div className="modal-footer mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="tf-btn-toolbar"
+                  onClick={() => setTableConfirmModal(null)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className={tableConfirmModal.type === "drop" ? "tf-btn-primary bg-red-600 hover:bg-red-700" : "tf-btn-primary bg-amber-500 hover:bg-amber-600"}
+                  onClick={() => {
+                    if (tableConfirmModal.type === "drop") void handleDropTable();
+                    else void handleTruncateTable();
+                  }}
+                >
+                  {tableConfirmModal.type === "drop" ? "确认删除" : "确认清空"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* 复制表弹窗 */}
+      {tableCopyModal &&
+        createPortal(
+          <div
+            className="modal-mask"
+            style={{ zIndex: 10010 }}
+            role="presentation"
+            onClick={() => !tableCopyModal.running && setTableCopyModal(null)}
+          >
+            <div
+              className="modal-panel max-w-[min(96vw,420px)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-head">
+                <span className="font-semibold text-slate-800">复制表</span>
+                <button
+                  type="button"
+                  className="tf-btn-icon ml-auto"
+                  onClick={() => !tableCopyModal.running && setTableCopyModal(null)}
+                  aria-label="关闭"
+                  disabled={tableCopyModal.running}
+                >
+                  <X className="h-4 w-4" strokeWidth={2} />
+                </button>
+              </div>
+              <div className="modal-body space-y-3 text-[13px]">
+                <div>
+                  <div className="mb-0.5 text-slate-500">源表</div>
+                  <div className="font-mono text-slate-700">{tableCopyModal.tableName}</div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-slate-500" htmlFor="copy-table-name">
+                    新表名
+                  </label>
+                  <input
+                    id="copy-table-name"
+                    className="tf-control w-full font-mono"
+                    value={tableCopyModal.newName}
+                    disabled={tableCopyModal.running}
+                    onChange={(e) =>
+                      setTableCopyModal((prev) => (prev ? { ...prev, newName: e.target.value, error: "" } : null))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !tableCopyModal.running) void handleCopyTable();
+                    }}
+                    autoFocus
+                  />
+                </div>
+                {tableCopyModal.error && (
+                  <div className="rounded bg-red-50 px-2 py-1.5 text-[12px] text-red-600">{tableCopyModal.error}</div>
+                )}
+              </div>
+              <div className="modal-footer mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="tf-btn-toolbar"
+                  onClick={() => setTableCopyModal(null)}
+                  disabled={tableCopyModal.running}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="tf-btn-primary flex items-center gap-1.5"
+                  onClick={() => void handleCopyTable()}
+                  disabled={tableCopyModal.running || !tableCopyModal.newName.trim()}
+                >
+                  {tableCopyModal.running && <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />}
+                  {tableCopyModal.running ? "执行中…" : "确认复制"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
