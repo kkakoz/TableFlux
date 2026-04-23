@@ -415,6 +415,11 @@ function hasAllPrimaryKeysInColumns(primaryKeys: string[], columns: string[]): b
   return primaryKeys.every((pk) => columnSet.has(pk.toLowerCase()));
 }
 
+function isDatabaseAccessDeniedError(err: unknown): boolean {
+  const text = String(err || "");
+  return /Error\s*1044/i.test(text) || /Access denied.*to database/i.test(text);
+}
+
 /** 与设置面板 `localStorage.settings` 及后端 GetSettings 对齐；优先本地（保存后立即生效） */
 async function resolveQueryLimit(): Promise<number> {
   try {
@@ -1146,6 +1151,14 @@ function StudioView({ groupId }: { groupId: string }) {
           prev.map((d) => (d.name === dbName ? { ...d, loaded: true, tables: tableNames } : d)),
         );
       } catch (e) {
+        if (isDatabaseAccessDeniedError(e)) {
+          // 无权限库（如 performance_schema）静默跳过，避免搜索时重复报错弹窗。
+          if (connId !== activeConnectionIdRef.current) return;
+          setDbTree((prev) =>
+            prev.map((d) => (d.name === dbName ? { ...d, loaded: true, tables: [] } : d)),
+          );
+          return;
+        }
         setError(String(e));
       }
     },
@@ -1754,11 +1767,11 @@ function StudioView({ groupId }: { groupId: string }) {
 
   useEffect(() => {
     if (tableFilter.trim() === "") return;
-    const unloaded = dbTree.filter((db) => !db.loaded).map((db) => db.name);
+    const unloaded = baseObjectTree.filter((db) => !db.loaded).map((db) => db.name);
     unloaded.forEach((dbName) => {
       loadTablesForDB(dbName).catch((e) => setError(String(e)));
     });
-  }, [tableFilter, dbTree]);
+  }, [tableFilter, baseObjectTree, loadTablesForDB]);
 
   const executeSqlForActiveTab = async (sql: string, mode: "single" | "batch") => {
     if (!activeConnectionId || !activeTab) return;
