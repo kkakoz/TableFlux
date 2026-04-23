@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Editor from "@monaco-editor/react";
 import {
   CompactSelection,
   DataEditor,
@@ -663,6 +664,7 @@ function StudioView({ groupId }: { groupId: string }) {
   const tableSchemaCacheRef = useRef<Map<string, TableSchema>>(new Map());
   const completionDisposableRef = useRef<IDisposable | null>(null);
   const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
+  const previewSqlEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
   const tableFilterInputRef = useRef<HTMLInputElement | null>(null);
   const runSQLSingleAtCursorRef = useRef<() => void>(() => {});
   const addTabRef = useRef<() => void>(() => {});
@@ -2417,6 +2419,10 @@ function StudioView({ groupId }: { groupId: string }) {
     }
   };
 
+  const openPreviewSqlFind = useCallback(() => {
+    void previewSqlEditorRef.current?.getAction("actions.find")?.run();
+  }, []);
+
   useEffect(() => {
     return () => {
       monacoEditorRef.current = null;
@@ -3305,6 +3311,15 @@ function StudioView({ groupId }: { groupId: string }) {
                       >
                         复制全部
                       </button>
+                      <button
+                        type="button"
+                        className="btn ghost text-xs"
+                        disabled={activeTab.tableEditPreviewLoading || !activeTab.tableEditPreviewStatements?.length}
+                        title="搜索（Ctrl+F）"
+                        onClick={() => openPreviewSqlFind()}
+                      >
+                        搜索
+                      </button>
                     </div>
                   </div>
                   {activeTab.tableEditPreviewLoading ? (
@@ -3313,12 +3328,35 @@ function StudioView({ groupId }: { groupId: string }) {
                       <span className="text-sm text-slate-500">正在生成 SQL…</span>
                     </div>
                   ) : (
-                    <textarea
-                      readOnly
-                      className="tf-scrollbar h-[min(50vh,420px)] w-full resize-y rounded border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] leading-relaxed text-slate-800"
-                      value={(activeTab.tableEditPreviewStatements ?? []).join("\n\n")}
-                      aria-label="待执行的 UPDATE 语句"
-                    />
+                    <div className="h-[min(50vh,420px)] overflow-hidden rounded border border-slate-200 bg-slate-50">
+                      <Editor
+                        height="100%"
+                        language="sql"
+                        value={(activeTab.tableEditPreviewStatements ?? []).join("\n\n")}
+                        onMount={(editor) => {
+                          previewSqlEditorRef.current = editor;
+                        }}
+                        options={{
+                          readOnly: true,
+                          minimap: { enabled: false },
+                          fontSize: 13,
+                          lineHeight: 17,
+                          wordWrap: "on",
+                          automaticLayout: true,
+                          scrollBeyondLastLine: false,
+                          find: {
+                            addExtraSpaceOnTop: false,
+                            cursorMoveOnType: true,
+                            seedSearchStringFromSelection: "never",
+                          },
+                          scrollbar: {
+                            verticalScrollbarSize: 8,
+                            horizontalScrollbarSize: 8,
+                            alwaysConsumeMouseWheel: false,
+                          },
+                        }}
+                      />
+                    </div>
                   )}
                   <div className="mt-4 flex justify-end gap-2 border-t border-slate-200/80 pt-3">
                     <button
