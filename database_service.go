@@ -1828,9 +1828,9 @@ func formatSQLLiteralForPreview(driver string, v any) string {
 	case uint64:
 		return strconv.FormatUint(t, 10)
 	case float32:
-		return strconv.FormatFloat(float64(t), 'g', -1, 32)
+		return formatDecimalFloatLiteral(float64(t), 32)
 	case float64:
-		return strconv.FormatFloat(t, 'g', -1, 64)
+		return formatDecimalFloatLiteral(t, 64)
 	case []byte:
 		if len(t) == 0 {
 			if driver == "postgres" {
@@ -1853,4 +1853,9 @@ func formatSQLLiteralForPreview(driver string, v any) string {
 	default:
 		return sqlStringLiteralForPreview(driver, fmt.Sprint(t))
 	}
+}
+
+func formatDecimalFloatLiteral(v float64, bitSize int) string {
+	// 在 SQL 预览中优先保持十进制展示，避免出现科学计数法（如 2.386207e+06）。
+	return strconv.FormatFloat(v, 'f', -1, bitSize)
 }

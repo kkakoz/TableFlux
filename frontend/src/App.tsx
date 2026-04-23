@@ -408,6 +408,12 @@ function buildTableBrowseSqlDisplay(
   return `SELECT * FROM ${t}${order} LIMIT ${limit} OFFSET ${offset}`;
 }
 
+function hasAllPrimaryKeysInColumns(primaryKeys: string[], columns: string[]): boolean {
+  if (primaryKeys.length === 0) return false;
+  const columnSet = new Set(columns.map((name) => name.toLowerCase()));
+  return primaryKeys.every((pk) => columnSet.has(pk.toLowerCase()));
+}
+
 /** 与设置面板 `localStorage.settings` 及后端 GetSettings 对齐；优先本地（保存后立即生效） */
 async function resolveQueryLimit(): Promise<number> {
   try {
@@ -1345,9 +1351,9 @@ function StudioView({ groupId }: { groupId: string }) {
     });
   }, [activeTab, runTablePageQuery]);
 
-  const patchActiveTableTab = useCallback(
+  const patchActiveEditableTab = useCallback(
     (updater: (t: WorkbenchTab) => WorkbenchTab) => {
-      if (!activeTab || activeTab.type !== "table" || !activeConnectionId) return;
+      if (!activeTab || !activeConnectionId) return;
       const db = activeTab.contextDb || selectedDatabase;
       const key = `${activeConnectionId}::${db || "__none__"}`;
       setTabsByDatabase((prev) => {
@@ -1363,8 +1369,8 @@ function StudioView({ groupId }: { groupId: string }) {
 
   const handleTableCellEdit = useCallback(
     (rowIndex: number, colName: string, value: unknown) => {
-      if (!activeTab || activeTab.type !== "table") return;
-      patchActiveTableTab((t) => {
+      if (!activeTab) return;
+      patchActiveEditableTab((t) => {
         const orig = t.tableEditOriginalRows?.[rowIndex];
         if (!orig) return t;
         const baseVal = orig[colName];
@@ -1385,15 +1391,15 @@ function StudioView({ groupId }: { groupId: string }) {
         return { ...t, tableEditDirtyRows: nextDirty };
       });
     },
-    [activeTab, patchActiveTableTab],
+    [activeTab, patchActiveEditableTab],
   );
 
   const handleTableCancelEdit = useCallback(() => {
-    patchActiveTableTab((t) => ({ ...t, tableEditDirtyRows: {} }));
-  }, [patchActiveTableTab]);
+    patchActiveEditableTab((t) => ({ ...t, tableEditDirtyRows: {} }));
+  }, [patchActiveEditableTab]);
 
   const handleTableOpenPreview = useCallback(async () => {
-    if (!activeTab || activeTab.type !== "table" || !activeConnectionId) return;
+    if (!activeTab || !activeConnectionId || !activeTab.contextTable) return;
     const pk = activeTab.tablePrimaryKey ?? [];
     if (pk.length === 0) {
       setError("无法确定主键，无法生成更新语句");
@@ -1418,7 +1424,7 @@ function StudioView({ groupId }: { groupId: string }) {
       setError("没有可提交的修改");
       return;
     }
-    patchActiveTableTab((t) => ({
+    patchActiveEditableTab((t) => ({
       ...t,
       tableEditPreviewOpen: true,
       tableEditPreviewLoading: true,
@@ -1435,14 +1441,14 @@ function StudioView({ groupId }: { groupId: string }) {
           rows,
         }),
       );
-      patchActiveTableTab((t) => ({
+      patchActiveEditableTab((t) => ({
         ...t,
         tableEditPreviewLoading: false,
         tableEditPreviewStatements: r.statements ?? [],
       }));
       setError("");
     } catch (e) {
-      patchActiveTableTab((t) => ({
+      patchActiveEditableTab((t) => ({
         ...t,
         tableEditPreviewLoading: false,
         tableEditPreviewOpen: false,
@@ -1450,19 +1456,19 @@ function StudioView({ groupId }: { groupId: string }) {
       }));
       setError(String(e));
     }
-  }, [activeTab, activeConnectionId, patchActiveTableTab, sqlDialect]);
+  }, [activeTab, activeConnectionId, patchActiveEditableTab, sqlDialect]);
 
   const handleTableClosePreview = useCallback(() => {
-    patchActiveTableTab((t) => ({
+    patchActiveEditableTab((t) => ({
       ...t,
       tableEditPreviewOpen: false,
       tableEditPreviewLoading: false,
       tableEditPreviewStatements: undefined,
     }));
-  }, [patchActiveTableTab]);
+  }, [patchActiveEditableTab]);
 
   const handleTableApplyPreview = useCallback(async () => {
-    if (!activeTab || activeTab.type !== "table" || !activeConnectionId) return;
+    if (!activeTab || !activeConnectionId || !activeTab.contextTable) return;
     const pk = activeTab.tablePrimaryKey ?? [];
     const dirty = activeTab.tableEditDirtyRows ?? {};
     const orig = activeTab.tableEditOriginalRows ?? [];
@@ -1477,7 +1483,8 @@ function StudioView({ groupId }: { groupId: string }) {
       rows.push(buildUpdateRowPayload(base, patch, pk));
     }
     if (pk.length === 0 || rows.length === 0) return;
-    patchActiveTableTab((t) => ({ ...t, tableEditApplyLoading: true }));
+    const mergedRows = mergeTableRowsForDisplay(orig, dirty).map((row) => ({ ...row }));
+    patchActiveEditableTab((t) => ({ ...t, tableEditApplyLoading: true }));
     try {
       await api.updateRows(
         new UpdateRowsRequest({
@@ -1489,24 +1496,27 @@ function StudioView({ groupId }: { groupId: string }) {
           rows,
         }),
       );
-      patchActiveTableTab((t) => ({
+      patchActiveEditableTab((t) => ({
         ...t,
         tableEditApplyLoading: false,
         tableEditPreviewOpen: false,
         tableEditPreviewStatements: undefined,
         tableEditDirtyRows: {},
+        tableEditOriginalRows: mergedRows,
       }));
       setError("");
-      void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
-        offset: activeTab.tableOffset ?? 0,
-        orderBy: activeTab.tableSortColumn ?? "",
-        orderDesc: activeTab.tableSortDesc ?? false,
-      });
+      if (activeTab.type === "table") {
+        void runTablePageQuery(activeTab.id, activeTab.contextDb, activeTab.contextTable, {
+          offset: activeTab.tableOffset ?? 0,
+          orderBy: activeTab.tableSortColumn ?? "",
+          orderDesc: activeTab.tableSortDesc ?? false,
+        });
+      }
     } catch (e) {
-      patchActiveTableTab((t) => ({ ...t, tableEditApplyLoading: false }));
+      patchActiveEditableTab((t) => ({ ...t, tableEditApplyLoading: false }));
       setError(String(e));
     }
-  }, [activeTab, activeConnectionId, patchActiveTableTab, runTablePageQuery, sqlDialect]);
+  }, [activeTab, activeConnectionId, patchActiveEditableTab, runTablePageQuery, sqlDialect]);
 
   const appendSelectSQL = (dbName: string, tableName: string) => {
     if (!activeConnectionId) return;
@@ -1703,6 +1713,7 @@ function StudioView({ groupId }: { groupId: string }) {
       const pageResult = await api.querySQLResultPage({ requestId, offset, limit: safeLimit });
       updateTabById(connectionId, dbName, tabId, (tab) => {
         if (tab.sqlResultRequestId !== requestId) return tab;
+        const updatableSqlResult = Boolean(tab.contextTable && (tab.tablePrimaryKey?.length ?? 0) > 0);
         return {
           ...tab,
           result: {
@@ -1725,6 +1736,10 @@ function StudioView({ groupId }: { groupId: string }) {
           sqlResultOffset: pageResult.offset,
           sqlResultPageLimit: pageResult.limit,
           sqlResultLoading: false,
+          tableEditOriginalRows: updatableSqlResult
+            ? (pageResult.rows ?? []).map((row) => ({ ...(row as Record<string, unknown>) }))
+            : undefined,
+          tableEditDirtyRows: updatableSqlResult ? {} : undefined,
           error: "",
         };
       });
@@ -1765,6 +1780,32 @@ function StudioView({ groupId }: { groupId: string }) {
         timeoutMs,
         requestId,
       });
+      let updatableTableName = "";
+      let updatablePkCols: string[] | undefined;
+      let updatableOriginalRows: Array<Record<string, unknown>> | undefined;
+      if (mode === "single" && Array.isArray(r.rows)) {
+        const tableRefs = extractReferencedCurrentDatabaseTables(trimmed, currentDatabaseTablesRef.current);
+        if (tableRefs.length === 1) {
+          const tableName = tableRefs[0];
+          try {
+            const schema = await getOrFetchTableSchema(connectionId, dbName, tableName, sqlDialect);
+            const pkCols = (schema.primaryKey || []).filter(Boolean);
+            const resultColumns =
+              r.columns && r.columns.length > 0
+                ? r.columns
+                : Object.keys((r.rows[0] as Record<string, unknown> | undefined) ?? {});
+            if (hasAllPrimaryKeysInColumns(pkCols, resultColumns)) {
+              updatableTableName = tableName;
+              updatablePkCols = pkCols;
+              updatableOriginalRows = (r.rows as Array<Record<string, unknown>>).map((row) => ({ ...row }));
+            }
+          } catch {
+            updatableTableName = "";
+            updatablePkCols = undefined;
+            updatableOriginalRows = undefined;
+          }
+        }
+      }
       pushSqlHistory(trimmed);
       setHistoryRev((n) => n + 1);
       finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
@@ -1777,6 +1818,13 @@ function StudioView({ groupId }: { groupId: string }) {
         sqlResultTotal: r.total,
         sqlResultOffset: r.offset,
         sqlResultPageLimit: r.limit || pageLimit,
+        contextTable: updatableTableName,
+        tablePrimaryKey: updatablePkCols,
+        tableEditOriginalRows: updatableOriginalRows,
+        tableEditDirtyRows: updatableTableName ? {} : undefined,
+        tableEditPreviewOpen: false,
+        tableEditPreviewLoading: false,
+        tableEditPreviewStatements: undefined,
       }));
     } catch (e) {
       finishSqlTabRequest(connectionId, dbName, tabId, requestId, (tab) => ({
@@ -1788,6 +1836,10 @@ function StudioView({ groupId }: { groupId: string }) {
         sqlResultTotal: undefined,
         sqlResultOffset: undefined,
         sqlResultPageLimit: undefined,
+        contextTable: "",
+        tablePrimaryKey: undefined,
+        tableEditOriginalRows: undefined,
+        tableEditDirtyRows: undefined,
       }));
     }
   };
@@ -2820,6 +2872,14 @@ function StudioView({ groupId }: { groupId: string }) {
                             const pageRows = rows;
                             const busy = activeTab?.sqlResultLoading ?? false;
                             const cacheRequestId = activeTab?.sqlResultRequestId ?? "";
+                            const sqlPkCols = activeTab?.tablePrimaryKey ?? [];
+                            const hasSqlPk = sqlPkCols.length > 0;
+                            const sqlDirtyMap = activeTab?.tableEditDirtyRows ?? {};
+                            const hasSqlDirty = Object.keys(sqlDirtyMap).some((k) => {
+                              const patch = sqlDirtyMap[Number(k)];
+                              return patch && Object.keys(patch).length > 0;
+                            });
+                            const canUpdateSqlResult = Boolean(activeTab?.contextTable && hasSqlPk);
                             return (
                               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
@@ -2828,18 +2888,26 @@ function StudioView({ groupId }: { groupId: string }) {
                                       <button
                                         type="button"
                                         className="tf-btn-icon-lg tf-btn-icon-bordered text-emerald-600"
-                                        disabled
-                                        title="SQL 查询结果不支持按主键更新（请使用表数据标签页）"
+                                        disabled={!canUpdateSqlResult || !hasSqlDirty || busy || activeTab?.tableEditPreviewLoading}
+                                        title={
+                                          !canUpdateSqlResult
+                                            ? "仅支持单表查询且结果包含完整主键时更新"
+                                            : !hasSqlDirty
+                                              ? "没有未提交的修改"
+                                              : "预览并提交更新"
+                                        }
                                         aria-label="执行"
+                                        onClick={() => void handleTableOpenPreview()}
                                       >
                                         <Check className="h-4 w-4" strokeWidth={2.5} />
                                       </button>
                                       <button
                                         type="button"
                                         className="tf-btn-icon-lg tf-btn-icon-bordered text-slate-500"
-                                        disabled
-                                        title="无可撤销的编辑"
+                                        disabled={!hasSqlDirty || busy}
+                                        title={hasSqlDirty ? "撤销未提交的修改" : "没有未提交的修改"}
                                         aria-label="取消"
+                                        onClick={() => handleTableCancelEdit()}
                                       >
                                         <XCircle className="h-4 w-4" strokeWidth={2.5} />
                                       </button>
@@ -2909,6 +2977,20 @@ function StudioView({ groupId }: { groupId: string }) {
                                     onCopyError={(msg) => setError(msg)}
                                     serverMode
                                     rowNumberStart={start + 1}
+                                    editable={canUpdateSqlResult}
+                                    primaryKeyColumns={sqlPkCols}
+                                    onCellValueChange={handleTableCellEdit}
+                                    dirtyFields={activeTab?.tableEditDirtyRows}
+                                    tableContext={
+                                      activeConnectionId && activeTab?.contextTable
+                                        ? {
+                                            connectionId: activeConnectionId,
+                                            database: activeTab.contextDb || selectedDatabase,
+                                            schema: sqlDialect === "postgres" ? "public" : "",
+                                            table: activeTab.contextTable,
+                                          }
+                                        : undefined
+                                    }
                                   />
                                 </div>
                               </div>
@@ -3192,7 +3274,7 @@ function StudioView({ groupId }: { groupId: string }) {
           onCopyError={(msg) => setError(msg)}
         />
 
-        {activeTab?.type === "table" && activeTab.tableEditPreviewOpen
+        {activeTab?.tableEditPreviewOpen
           ? createPortal(
               <div
                 className="modal-mask"

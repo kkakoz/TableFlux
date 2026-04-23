@@ -28,6 +28,9 @@ func TestFormatSQLLiteralForPreview(t *testing.T) {
 	if formatSQLLiteralForPreview("postgres", 42) != "42" {
 		t.Fatal("int")
 	}
+	if got := formatSQLLiteralForPreview("mysql", float64(2386207)); got != "2386207" {
+		t.Fatalf("float id should not be scientific notation: %s", got)
+	}
 	if got := formatSQLLiteralForPreview("mysql", "2026-03-29T01:07:57Z"); got != "'2026-03-29 01:07:57'" {
 		t.Fatalf("rfc3339 mysql time = %s", got)
 	}
