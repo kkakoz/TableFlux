@@ -1481,6 +1481,18 @@ func (s *DatabaseService) snapshotMigrationJobLocked(job *dataMigrationJob) Data
 	return snapshot
 }
 
+// HasRunningMigration returns true if any migration job is currently running.
+func (s *DatabaseService) HasRunningMigration() bool {
+	s.migrationMu.Lock()
+	defer s.migrationMu.Unlock()
+	for _, job := range s.migrationJobs {
+		if job.status == "running" {
+			return true
+		}
+	}
+	return false
+}
+
 func migrationTableIndex(job *dataMigrationJob, table string) int {
 	for i := range job.tables {
 		if job.tables[i].Table == table {

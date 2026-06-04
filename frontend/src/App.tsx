@@ -2006,7 +2006,9 @@ function StudioView({ groupId }: { groupId: string }) {
     setTargetTables([]);
     setMigrationTableFilter("");
     setMigrationMsg("");
-    setMigrationJob(null);
+    if (!migrationBusy) {
+      setMigrationJob(null);
+    }
     setMigrationOpen(true);
   };
 
@@ -3055,6 +3057,9 @@ function StudioView({ groupId }: { groupId: string }) {
                     activeTab.tableTotal > activeTab.tablePageLimit;
                   const prevDisabled = off <= 0 || tBusy;
                   const nextDisabled = tBusy || off + lim >= total;
+                  // DEBUG: 临时调试信息
+                  const isEditable = hasPk;
+                  console.log("[DEBUG] tablePrimaryKey:", activeTab.tablePrimaryKey, "hasPk:", hasPk, "editable:", isEditable, "table:", activeTab.contextTable);
                   return (
                     <div className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-slate-200/90 bg-slate-50/80 px-3 py-1.5">
                       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -3564,15 +3569,29 @@ function StudioView({ groupId }: { groupId: string }) {
                   <h3>数据迁移</h3>
                   <p className="migration-subtitle">按表并发迁移数据，每个协程一次处理一张表。</p>
                 </div>
-                <button
-                  className="btn ghost"
-                  onClick={() => {
-                    setMigrationOpen(false);
-                    if (migrationJob) setMigrationProgressOpen(true);
-                  }}
-                >
-                  关闭
-                </button>
+                <div className="migration-head-actions">
+                  {migrationBusy && migrationJob && (
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => {
+                        setMigrationOpen(false);
+                        setMigrationProgressOpen(true);
+                      }}
+                    >
+                      查看进度 {migrationProgressPercent}%
+                    </button>
+                  )}
+                  <button
+                    className="btn ghost"
+                    onClick={() => {
+                      setMigrationOpen(false);
+                      if (migrationJob) setMigrationProgressOpen(true);
+                    }}
+                  >
+                    关闭
+                  </button>
+                </div>
               </div>
 
               <div className="migration-config">
@@ -3712,7 +3731,7 @@ function StudioView({ groupId }: { groupId: string }) {
                 <button
                   className="btn ghost"
                   type="button"
-                  onClick={() => setMigrationHistoryOpen(true)}
+                  onClick={() => { setMigrationOpen(false); setMigrationHistoryOpen(true); }}
                 >
                   查看迁移历史
                 </button>
@@ -3746,6 +3765,15 @@ function StudioView({ groupId }: { groupId: string }) {
                   <button className="btn ghost" type="button" onClick={() => setMigrationProgressOpen(false)}>
                     关闭
                   </button>
+                  {migrationHistory.length > 0 && (
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => { setMigrationProgressOpen(false); setMigrationHistoryOpen(true); }}
+                    >
+                      迁移历史
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3796,6 +3824,21 @@ function StudioView({ groupId }: { groupId: string }) {
             </div>
           </div>
         )}
+
+        {/* 迁移进行中但进度面板已关闭时，通过 portal 显示浮动指示器 */}
+        {migrationBusy && !migrationProgressOpen && migrationJob &&
+          createPortal(
+            <button
+              className="migration-float-indicator"
+              type="button"
+              onClick={() => setMigrationProgressOpen(true)}
+              title="查看迁移进度"
+            >
+              <Loader2 className="spin" size={14} />
+              <span>迁移中 {migrationProgressPercent}%</span>
+            </button>,
+            document.getElementById("portal")!,
+          )}
 
         {migrationHistoryOpen && (
           <div className="modal-mask">

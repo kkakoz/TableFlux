@@ -47,6 +47,13 @@ export function GetTableSchema(req: $models.TableSchemaRequest): $CancellablePro
     });
 }
 
+/**
+ * HasRunningMigration returns true if any migration job is currently running.
+ */
+export function HasRunningMigration(): $CancellablePromise<boolean> {
+    return $Call.ByID(3824549157);
+}
+
 export function InsertRows(req: $models.InsertRowsRequest): $CancellablePromise<$models.SQLExecutionResult> {
     return $Call.ByID(2045419812, req).then(($result: any) => {
         return $$createType0($result);

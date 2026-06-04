@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -46,7 +47,7 @@ func main() {
 		},
 	})
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	mainWin := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
 		Title:            "TableFlux",
 		Width:            920,
@@ -60,6 +61,14 @@ func main() {
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},
+	})
+
+	// 迁移进行中时：阻止关闭窗口，改为隐藏；无迁移时正常关闭
+	mainWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		if dbSvc.HasRunningMigration() {
+			e.Cancel()
+			mainWin.Hide()
+		}
 	})
 
 	if err := app.Run(); err != nil {

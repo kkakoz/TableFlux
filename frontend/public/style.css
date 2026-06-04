@@ -2115,3 +2115,37 @@ th {
     grid-template-columns: minmax(120px, 1fr) 72px 64px minmax(120px, 1fr);
   }
 }
+
+/* Floating migration indicator */
+.migration-float-indicator {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--accent);
+  background: var(--card);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.migration-float-indicator:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  transform: translateY(-1px);
+}
+
+.migration-float-indicator .spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
